@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
 import { ImageUploadSlot } from './ImageUpload'
 import { compressImage, readFileAsDataUrl } from './ImageUpload'
+import { DEFAULT_THEME, THEME_PRESETS, FONT_OPTIONS, getTheme, ensureGoogleFont, withAlpha, contrastColor } from './theme'
 
 function generateGameId() {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
@@ -28,6 +29,12 @@ export default function HostDashboard() {
   const [revealedMap, setRevealedMap] = useState({})
 
   useEffect(() => { loadGames() }, [])
+
+  useEffect(() => {
+    if (!currentGame?.theme) return
+    ensureGoogleFont(currentGame.theme.headingFont)
+    ensureGoogleFont(currentGame.theme.bodyFont)
+  }, [currentGame?.theme?.headingFont, currentGame?.theme?.bodyFont])
 
   useEffect(() => {
     if (screen !== 'manage' || !currentGame) return
@@ -74,11 +81,19 @@ export default function HostDashboard() {
 
   function startNewGame() {
     const id = generateGameId()
-    setCurrentGame({ id, title: '', questions: SAMPLE_QUESTIONS, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(), answers: {} })
+    setCurrentGame({ id, title: '', theme: { ...DEFAULT_THEME }, questions: SAMPLE_QUESTIONS, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(), answers: {} })
     setGameTitle('')
     setNewPost(EMPTY_POST)
     setScreen('create')
     setActiveTab('questions')
+  }
+
+  function updateTheme(patch) {
+    setCurrentGame(g => ({ ...g, theme: { ...getTheme(g), ...patch } }))
+  }
+
+  function applyPreset(preset) {
+    updateTheme(preset.theme)
   }
 
   async function publishGame() {
@@ -197,7 +212,9 @@ export default function HostDashboard() {
   )
 
   // ── CREATE ────────────────────────────────────────────────────────────────
-  if (screen === 'create') return (
+  if (screen === 'create') {
+    const theme = getTheme(currentGame)
+    return (
     <div style={s.page}>
       <div style={s.container}>
         <div style={s.topBar}>
@@ -205,7 +222,7 @@ export default function HostDashboard() {
           <div style={s.step}>GAME SETUP · {currentGame.id}</div>
         </div>
         <div style={s.tabs}>
-          {['questions', 'preview'].map(t => (
+          {['questions', 'customize', 'preview'].map(t => (
             <button key={t} style={{ ...s.tab, ...(activeTab === t ? s.tabOn : {}) }} onClick={() => setActiveTab(t)}>{t.toUpperCase()}</button>
           ))}
         </div>
@@ -263,6 +280,78 @@ export default function HostDashboard() {
           </>
         )}
 
+        {activeTab === 'customize' && (
+          <div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={s.label}>GAME NAME</label>
+              <input style={s.input} placeholder="e.g. Sarah's Bachelorette Party 🎉" value={gameTitle} onChange={e => setGameTitle(e.target.value)} />
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <label style={s.label}>TAGLINE</label>
+              <input style={s.input} placeholder="Shown under the logo on the join screen" value={theme.tagline} onChange={e => updateTheme({ tagline: e.target.value })} />
+            </div>
+
+            <div style={s.section}>
+              <h2 style={s.sectionTitle}>QUICK PRESETS</h2>
+              <div style={s.presetGrid}>
+                {THEME_PRESETS.map(preset => (
+                  <button key={preset.id} style={s.presetBtn} onClick={() => applyPreset(preset)}>
+                    <span style={{ fontSize: 22 }}>{preset.emoji}</span>
+                    <span style={{ display: 'flex', gap: 4 }}>
+                      {[preset.theme.primaryColor, preset.theme.secondaryColor, preset.theme.backgroundColor].map((c, i) => (
+                        <span key={i} style={{ width: 12, height: 12, borderRadius: '50%', background: c, border: '1px solid #ffffff22' }} />
+                      ))}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#ccc', textAlign: 'center' }}>{preset.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={s.section}>
+              <h2 style={s.sectionTitle}>COLORS</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                <ColorField label="PRIMARY" value={theme.primaryColor} onChange={v => updateTheme({ primaryColor: v })} />
+                <ColorField label="SECONDARY" value={theme.secondaryColor} onChange={v => updateTheme({ secondaryColor: v })} />
+                <ColorField label="BACKGROUND" value={theme.backgroundColor} onChange={v => updateTheme({ backgroundColor: v })} />
+                <ColorField label="CARD" value={theme.cardColor} onChange={v => updateTheme({ cardColor: v })} />
+                <ColorField label="TEXT" value={theme.textColor} onChange={v => updateTheme({ textColor: v })} />
+              </div>
+            </div>
+
+            <div style={s.section}>
+              <h2 style={s.sectionTitle}>FONTS</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div>
+                  <label style={s.label}>HEADING FONT</label>
+                  <select style={s.input} value={theme.headingFont} onChange={e => updateTheme({ headingFont: e.target.value })}>
+                    {FONT_OPTIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={s.label}>BODY FONT</label>
+                  <select style={s.input} value={theme.bodyFont} onChange={e => updateTheme({ bodyFont: e.target.value })}>
+                    {FONT_OPTIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div style={s.section}>
+              <h2 style={s.sectionTitle}>BRANDING IMAGES</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <ImageUploadSlot label="LOGO" hint="Shown instead of the text logo" value={theme.logoImage} onChange={v => updateTheme({ logoImage: v })} accentColor={theme.primaryColor} />
+                <ImageUploadSlot label="BACKGROUND IMAGE" hint="Faint full-page background" value={theme.backgroundImage} onChange={v => updateTheme({ backgroundImage: v })} accentColor={theme.secondaryColor} maxDim={1600} />
+              </div>
+            </div>
+
+            <div style={s.section}>
+              <h2 style={s.sectionTitle}>LIVE PREVIEW</h2>
+              <ThemePreview theme={theme} title={gameTitle} />
+            </div>
+          </div>
+        )}
+
         {activeTab === 'preview' && (
           <div>
             <h2 style={s.sectionTitle}>PREVIEW</h2>
@@ -290,7 +379,8 @@ export default function HostDashboard() {
         )}
       </div>
     </div>
-  )
+    )
+  }
 
   // ── MANAGE ────────────────────────────────────────────────────────────────
   if (screen === 'manage' && currentGame) {
@@ -404,6 +494,46 @@ function chip(color) {
   return { fontSize: 10, color, background: color + '22', border: `1px solid ${color}44`, borderRadius: 3, padding: '2px 7px', letterSpacing: 1 }
 }
 
+function ColorField({ label, value, onChange }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={s.label}>{label}</label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <input type="color" value={value} onChange={e => onChange(e.target.value)} style={s.colorSwatch} />
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} style={{ ...s.input, flex: 1 }} />
+      </div>
+    </div>
+  )
+}
+
+function ThemePreview({ theme, title }) {
+  return (
+    <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', border: `1px solid ${withAlpha(theme.textColor, 0.15)}`, background: theme.backgroundColor, padding: '28px 22px', fontFamily: theme.bodyFont }}>
+      {theme.backgroundImage && (
+        <div style={{ position: 'absolute', inset: 0, backgroundImage: `url(${theme.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.35 }} />
+      )}
+      <div style={{ position: 'relative' }}>
+        {theme.logoImage ? (
+          <img src={theme.logoImage} alt="logo" style={{ maxWidth: 140, maxHeight: 70, objectFit: 'contain', display: 'block', margin: '0 auto 10px' }} />
+        ) : (
+          <div style={{ textAlign: 'center', fontFamily: theme.headingFont, fontSize: 22, fontWeight: 900, letterSpacing: 2, color: theme.textColor, marginBottom: 6 }}>
+            {title || 'YOUR GAME'}
+          </div>
+        )}
+        <div style={{ textAlign: 'center', fontSize: 11, letterSpacing: 1, color: withAlpha(theme.textColor, 0.6), marginBottom: 20 }}>{theme.tagline}</div>
+        <div style={{ background: theme.cardColor, border: `1px solid ${withAlpha(theme.textColor, 0.12)}`, borderRadius: 10, padding: '14px 16px', marginBottom: 14 }}>
+          <div style={{ fontSize: 11, color: withAlpha(theme.textColor, 0.5), marginBottom: 6 }}>@someone</div>
+          <div style={{ fontSize: 14, color: theme.textColor, lineHeight: 1.5 }}>"Just spent 3 hours reorganizing my spice cabinet alphabetically."</div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div style={{ padding: '10px 8px', borderRadius: 6, textAlign: 'center', fontSize: 12, fontWeight: 700, background: theme.primaryColor, color: contrastColor(theme.primaryColor) }}>Alex</div>
+          <div style={{ padding: '10px 8px', borderRadius: 6, textAlign: 'center', fontSize: 12, fontWeight: 700, background: theme.secondaryColor, color: contrastColor(theme.secondaryColor) }}>Jordan ✓</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const s = {
   page: { minHeight: '100vh', background: '#0a0a12', color: '#f0f0f0', fontFamily: "'Courier New', monospace", padding: '0 0 80px' },
   container: { maxWidth: 680, margin: '0 auto', padding: '24px 20px' },
@@ -444,4 +574,7 @@ const s = {
   revealBox: { background: '#0d0d1a', border: '1px solid #00ff8822', borderRadius: 6, padding: 16, marginBottom: 12 },
   showRevealBtn: { width: '100%', padding: '13px 16px', background: '#00ff8822', color: '#00ff88', border: '1px solid #00ff8844', borderRadius: 4, cursor: 'pointer', fontSize: 14, fontWeight: 700, fontFamily: "'Courier New', monospace", letterSpacing: 1 },
   hideRevealBtn: { background: 'none', border: '1px solid #ff6b6b44', color: '#ff6b6b', borderRadius: 3, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontFamily: "'Courier New', monospace" },
+  presetGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 },
+  presetBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: '#111120', border: '1px solid #222', borderRadius: 6, padding: '14px 10px', cursor: 'pointer', fontFamily: "'Courier New', monospace" },
+  colorSwatch: { width: 40, height: 40, padding: 0, border: '1px solid #222', borderRadius: 4, background: 'none', cursor: 'pointer' },
 }
