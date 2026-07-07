@@ -8,6 +8,10 @@ function generateGameId() {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
 }
 
+function generateHostKey() {
+  return Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10)
+}
+
 const EMPTY_POST = { post: '', author: '', choices: ['', '', '', ''], questionImage: null, revealImage: null }
 
 const SAMPLE_QUESTIONS = [
@@ -16,8 +20,9 @@ const SAMPLE_QUESTIONS = [
   { id: 3, post: "Why do I always have the best ideas at 2am? Probably going to patent this tomorrow.", author: "Riley", choices: ["Alex", "Jordan", "Sam", "Riley"], questionImage: null, revealImage: null },
 ]
 
-export default function HostDashboard() {
-  const [screen, setScreen] = useState('home')
+export default function HostDashboard({ hostGameId = null, hostAccessKey = '' }) {
+  const isHostMode = !!hostGameId
+  const [screen, setScreen] = useState(isHostMode ? 'hostloading' : 'home')
   const [games, setGames] = useState([])
   const [currentGame, setCurrentGame] = useState(null)
   const [newPost, setNewPost] = useState(EMPTY_POST)
@@ -29,8 +34,22 @@ export default function HostDashboard() {
   const [revealedMap, setRevealedMap] = useState({})
   const [guestName, setGuestName] = useState('')
   const [guestCopied, setGuestCopied] = useState(false)
+  const [hostCopied, setHostCopied] = useState(false)
 
   useEffect(() => { loadGames() }, [])
+
+  // Host mode: load only the linked game and require a matching host key
+  useEffect(() => {
+    if (!isHostMode) return
+    ;(async () => {
+      const { data } = await supabase.from('games').select('data').eq('game_id', hostGameId).single()
+      const g = data?.data
+      if (!g || !g.hostKey || g.hostKey !== hostAccessKey) { setScreen('hosterror'); return }
+      setCurrentGame(g)
+      setGameTitle(g.title || '')
+      setScreen('manage')
+    })()
+  }, [])
 
   useEffect(() => {
     if (!currentGame?.theme) return
@@ -52,6 +71,7 @@ export default function HostDashboard() {
   }, [screen, currentGame?.id])
 
   async function loadGames() {
+    if (isHostMode) return
     const { data, error } = await supabase
       .from('games')
       .select('game_id, data')
@@ -83,7 +103,7 @@ export default function HostDashboard() {
 
   function startNewGame() {
     const id = generateGameId()
-    setCurrentGame({ id, title: '', theme: { ...DEFAULT_THEME }, questions: SAMPLE_QUESTIONS, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(), answers: {} })
+    setCurrentGame({ id, title: '', hostKey: generateHostKey(), theme: { ...DEFAULT_THEME }, questions: SAMPLE_QUESTIONS, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(), answers: {} })
     setGameTitle('')
     setNewPost(EMPTY_POST)
     setScreen('create')
@@ -171,6 +191,21 @@ export default function HostDashboard() {
     try { await navigator.clipboard.writeText(getGuestLink(gameId)); setGuestCopied(true); setTimeout(() => setGuestCopied(false), 2000) } catch {}
   }
 
+  function getHostLink(game) {
+    return `${window.location.origin}/?game=${game.id}&role=host&key=${game.hostKey || ''}`
+  }
+
+  // Games created before host links exist get a key generated on first copy
+  async function copyHostLink() {
+    let game = currentGame
+    if (!game.hostKey) {
+      game = { ...game, hostKey: generateHostKey() }
+      await saveGame(game)
+      setCurrentGame(game)
+    }
+    try { await navigator.clipboard.writeText(getHostLink(game)); setHostCopied(true); setTimeout(() => setHostCopied(false), 2000) } catch {}
+  }
+
   function computeScores(game) {
     const scores = {}
     ;(game.players || []).forEach(p => (scores[p.name] = 0))
@@ -181,6 +216,24 @@ export default function HostDashboard() {
     })
     return Object.entries(scores).sort((a, b) => b[1] - a[1])
   }
+
+  // ── HOST MODE: LOADING / ERROR ────────────────────────────────────────────
+  if (screen === 'hostloading') return (
+    <div style={s.page}>
+      <div style={{ ...s.container, textAlign: 'center', paddingTop: 120 }}>
+        <div style={{ fontSize: 14, color: '#aaa', letterSpacing: 1 }}>Loading your game…</div>
+      </div>
+    </div>
+  )
+  if (screen === 'hosterror') return (
+    <div style={s.page}>
+      <div style={{ ...s.container, textAlign: 'center', paddingTop: 120 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>Invalid host link</div>
+        <div style={{ fontSize: 13, color: '#555', lineHeight: 1.6 }}>This link is missing or has the wrong host key.<br />Ask the game organizer to send you a fresh one.</div>
+      </div>
+    </div>
+  )
 
   // ── HOME ──────────────────────────────────────────────────────────────────
   if (screen === 'home') return (
@@ -226,7 +279,7 @@ export default function HostDashboard() {
   // ── CREATE ────────────────────────────────────────────────────────────────
   if (screen === 'create') {
     const theme = getTheme(currentGame)
-    const isPublished = games.some(g => g.id === currentGame.id)
+    const isPublished = isHostMode || games.some(g => g.id === currentGame.id)
     return (
     <div style={s.page}>
       <div style={s.container}>
@@ -410,7 +463,9 @@ export default function HostDashboard() {
       <div style={s.page}>
         <div style={s.container}>
           <div style={s.topBar}>
-            <button style={s.back} onClick={() => setScreen('home')}>← Home</button>
+            {isHostMode
+              ? <div style={{ ...s.step, color: '#ffd166' }}>YOU'RE THE HOST</div>
+              : <button style={s.back} onClick={() => setScreen('home')}>← Home</button>}
             <div style={s.step}>{currentGame.title}</div>
           </div>
           <div style={s.shareBox}>
@@ -426,6 +481,14 @@ export default function HostDashboard() {
               </div>
               {guestName.trim() && <div style={{ fontSize: 11, color: '#666', wordBreak: 'break-all', marginTop: 8, lineHeight: 1.5 }}>{getGuestLink(currentGame.id)}</div>}
             </div>
+            {!isHostMode && (
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #ffd16622' }}>
+                <div style={{ fontSize: 10, letterSpacing: 2, color: '#00ff88', marginBottom: 6 }}>HOST LINK — FOR YOUR CUSTOMER</div>
+                <div style={{ fontSize: 11, color: '#555', marginBottom: 10 }}>Lets them edit and run this game without seeing your other games.</div>
+                {currentGame.hostKey && <div style={{ fontSize: 11, color: '#666', wordBreak: 'break-all', marginBottom: 8, lineHeight: 1.5 }}>{getHostLink(currentGame)}</div>}
+                <button style={{ ...s.copyBtn, background: '#00ff88' }} onClick={copyHostLink}>{hostCopied ? '✓ Copied!' : 'Copy Host Link'}</button>
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
             <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('questions'); setScreen('create') }}>✎ Edit Questions</button>
