@@ -10,8 +10,9 @@ function App() {
   const gameId = params.get('game')
 
   // If URL has ?game=XXX&role=player → show player view
+  // Optional &name=Sarah pre-fills the guest's name on the join screen
   if (role === 'player' && gameId) {
-    return <PlayerRoom gameId={gameId} />
+    return <PlayerRoom gameId={gameId} initialName={params.get('name') || ''} />
   }
 
   // Otherwise → host dashboard

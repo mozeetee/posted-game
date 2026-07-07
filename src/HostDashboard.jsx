@@ -27,6 +27,8 @@ export default function HostDashboard() {
   const [saveError, setSaveError] = useState('')
   const [saving, setSaving] = useState(false)
   const [revealedMap, setRevealedMap] = useState({})
+  const [guestName, setGuestName] = useState('')
+  const [guestCopied, setGuestCopied] = useState(false)
 
   useEffect(() => { loadGames() }, [])
 
@@ -98,7 +100,8 @@ export default function HostDashboard() {
 
   async function publishGame() {
     if (!gameTitle.trim() || currentGame.questions.length === 0) return
-    const game = { ...currentGame, title: gameTitle, status: 'lobby' }
+    // keep the existing status when editing a published game; new games are already 'lobby'
+    const game = { ...currentGame, title: gameTitle }
     await saveGame(game)
     if (!saveError) { setCurrentGame(game); setScreen('manage') }
   }
@@ -155,8 +158,17 @@ export default function HostDashboard() {
     return `${window.location.origin}/?game=${gameId}&role=player`
   }
 
+  function getGuestLink(gameId) {
+    return `${getGameLink(gameId)}&name=${encodeURIComponent(guestName.trim())}`
+  }
+
   async function copyLink(gameId) {
     try { await navigator.clipboard.writeText(getGameLink(gameId)); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch {}
+  }
+
+  async function copyGuestLink(gameId) {
+    if (!guestName.trim()) return
+    try { await navigator.clipboard.writeText(getGuestLink(gameId)); setGuestCopied(true); setTimeout(() => setGuestCopied(false), 2000) } catch {}
   }
 
   function computeScores(game) {
@@ -214,12 +226,13 @@ export default function HostDashboard() {
   // ── CREATE ────────────────────────────────────────────────────────────────
   if (screen === 'create') {
     const theme = getTheme(currentGame)
+    const isPublished = games.some(g => g.id === currentGame.id)
     return (
     <div style={s.page}>
       <div style={s.container}>
         <div style={s.topBar}>
-          <button style={s.back} onClick={() => setScreen('home')}>← Back</button>
-          <div style={s.step}>GAME SETUP · {currentGame.id}</div>
+          <button style={s.back} onClick={() => setScreen(isPublished ? 'manage' : 'home')}>← {isPublished ? 'Back to Manage' : 'Back'}</button>
+          <div style={s.step}>{isPublished ? 'EDIT GAME' : 'GAME SETUP'} · {currentGame.id}</div>
         </div>
         <div style={s.tabs}>
           {['questions', 'customize', 'preview'].map(t => (
@@ -276,7 +289,7 @@ export default function HostDashboard() {
               style={{ ...s.bigBtn, marginTop: 24, opacity: (!gameTitle.trim() || currentGame.questions.length === 0 || saving) ? 0.4 : 1 }}
               onClick={publishGame}
               disabled={!gameTitle.trim() || currentGame.questions.length === 0 || saving}
-            >{saving ? 'Saving…' : 'Publish & Get Share Link →'}</button>
+            >{saving ? 'Saving…' : isPublished ? 'Save Changes →' : 'Publish & Get Share Link →'}</button>
           </>
         )}
 
@@ -404,6 +417,19 @@ export default function HostDashboard() {
             <div style={{ fontSize: 10, letterSpacing: 2, color: '#ffd166', marginBottom: 6 }}>SHARE WITH PLAYERS</div>
             <div style={{ fontSize: 12, color: '#aaa', wordBreak: 'break-all', marginBottom: 10, lineHeight: 1.5 }}>{getGameLink(currentGame.id)}</div>
             <button style={s.copyBtn} onClick={() => copyLink(currentGame.id)}>{copied ? '✓ Copied!' : 'Copy Link'}</button>
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #ffd16622' }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: '#ffd166', marginBottom: 6 }}>PERSONALIZED LINK</div>
+              <div style={{ fontSize: 11, color: '#555', marginBottom: 10 }}>Type a guest's name to make a link that pre-fills it on their join screen.</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input style={{ ...s.input, flex: 1 }} placeholder="Guest name, e.g. Sarah" value={guestName} onChange={e => { setGuestName(e.target.value); setGuestCopied(false) }} />
+                <button style={{ ...s.copyBtn, opacity: guestName.trim() ? 1 : 0.4, whiteSpace: 'nowrap' }} disabled={!guestName.trim()} onClick={() => copyGuestLink(currentGame.id)}>{guestCopied ? '✓ Copied!' : 'Copy'}</button>
+              </div>
+              {guestName.trim() && <div style={{ fontSize: 11, color: '#666', wordBreak: 'break-all', marginTop: 8, lineHeight: 1.5 }}>{getGuestLink(currentGame.id)}</div>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+            <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('questions'); setScreen('create') }}>✎ Edit Questions</button>
+            <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('customize'); setScreen('create') }}>🎨 Customize Theme</button>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
             <div style={{ fontSize: 12, letterSpacing: 2, fontWeight: 700 }}>
@@ -574,6 +600,7 @@ const s = {
   revealBox: { background: '#0d0d1a', border: '1px solid #00ff8822', borderRadius: 6, padding: 16, marginBottom: 12 },
   showRevealBtn: { width: '100%', padding: '13px 16px', background: '#00ff8822', color: '#00ff88', border: '1px solid #00ff8844', borderRadius: 4, cursor: 'pointer', fontSize: 14, fontWeight: 700, fontFamily: "'Courier New', monospace", letterSpacing: 1 },
   hideRevealBtn: { background: 'none', border: '1px solid #ff6b6b44', color: '#ff6b6b', borderRadius: 3, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontFamily: "'Courier New', monospace" },
+  editBtn: { flex: 1, padding: '12px 16px', background: '#111120', color: '#ffd166', border: '1px solid #ffd16644', borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 700, letterSpacing: 1, fontFamily: "'Courier New', monospace" },
   presetGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 },
   presetBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: '#111120', border: '1px solid #222', borderRadius: 6, padding: '14px 10px', cursor: 'pointer', fontFamily: "'Courier New', monospace" },
   colorSwatch: { width: 40, height: 40, padding: 0, border: '1px solid #222', borderRadius: 4, background: 'none', cursor: 'pointer' },

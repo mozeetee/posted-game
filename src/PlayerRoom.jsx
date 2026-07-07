@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import { getTheme, ensureGoogleFont, withAlpha, contrastColor } from './theme'
 
-export default function PlayerRoom({ gameId }) {
+export default function PlayerRoom({ gameId, initialName = '' }) {
   const [phase, setPhase] = useState('join')
-  const [playerName, setPlayerName] = useState('')
+  const [playerName, setPlayerName] = useState(initialName)
   const [game, setGame] = useState(null)
   const [error, setError] = useState('')
   const [selectedAnswer, setSelectedAnswer] = useState(null)
