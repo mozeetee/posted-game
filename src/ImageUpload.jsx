@@ -27,13 +27,13 @@ export async function compressImage(dataUrl, maxDim = 900) {
   })
 }
 
-export function ImageUploadSlot({ label, hint, value, onChange, accentColor = '#ffd166' }) {
+export function ImageUploadSlot({ label, hint, value, onChange, accentColor = '#ffd166', maxDim = 900 }) {
   const inputRef = useRef(null)
 
   async function processFile(file) {
     if (!file || !file.type.startsWith('image/')) return
     const raw = await readFileAsDataUrl(file)
-    const compressed = await compressImage(raw, 900)
+    const compressed = await compressImage(raw, maxDim)
     onChange(compressed)
   }
 
