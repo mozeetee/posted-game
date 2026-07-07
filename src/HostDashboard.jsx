@@ -12,6 +12,15 @@ function generateHostKey() {
   return Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10)
 }
 
+// SHA-256 of the admin password — the password itself never appears in the code
+const ADMIN_PASSWORD_HASH = 'e22173b8c6cda8399e9de7c3a94e3b17d1394968b5a3cb8c5080544e8d2b1b79'
+const ADMIN_UNLOCK_STORAGE_KEY = 'wpt_admin_unlocked'
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
 const EMPTY_POST = { post: '', author: '', choices: ['', '', '', ''], questionImage: null, revealImage: null }
 
 const SAMPLE_QUESTIONS = [
@@ -35,8 +44,22 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [guestName, setGuestName] = useState('')
   const [guestCopied, setGuestCopied] = useState(false)
   const [hostCopied, setHostCopied] = useState(false)
+  const [unlocked, setUnlocked] = useState(isHostMode || localStorage.getItem(ADMIN_UNLOCK_STORAGE_KEY) === ADMIN_PASSWORD_HASH)
+  const [pwInput, setPwInput] = useState('')
+  const [pwError, setPwError] = useState('')
 
-  useEffect(() => { loadGames() }, [])
+  useEffect(() => { if (unlocked) loadGames() }, [unlocked])
+
+  async function tryUnlock() {
+    setPwError('')
+    if (await sha256Hex(pwInput) === ADMIN_PASSWORD_HASH) {
+      localStorage.setItem(ADMIN_UNLOCK_STORAGE_KEY, ADMIN_PASSWORD_HASH)
+      setUnlocked(true)
+    } else {
+      setPwError('Wrong password. Try again.')
+      setPwInput('')
+    }
+  }
 
   // Host mode: load only the linked game and require a matching host key
   useEffect(() => {
@@ -216,6 +239,29 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     })
     return Object.entries(scores).sort((a, b) => b[1] - a[1])
   }
+
+  // ── ADMIN LOCK SCREEN ─────────────────────────────────────────────────────
+  if (!isHostMode && !unlocked) return (
+    <div style={s.page}>
+      <div style={{ ...s.container, maxWidth: 380, textAlign: 'center', paddingTop: 100 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🔐</div>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Admin Access</div>
+        <div style={{ fontSize: 12, color: '#555', marginBottom: 28, letterSpacing: 1 }}>Enter the admin password to manage games.</div>
+        <input
+          type="password"
+          inputMode="numeric"
+          style={{ ...s.input, textAlign: 'center', fontSize: 20, letterSpacing: 8, marginBottom: 14 }}
+          placeholder="••••••"
+          value={pwInput}
+          onChange={e => setPwInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && tryUnlock()}
+          autoFocus
+        />
+        {pwError && <div style={{ color: '#ff6b6b', fontSize: 12, marginBottom: 14 }}>{pwError}</div>}
+        <button style={s.bigBtn} onClick={tryUnlock}>Unlock →</button>
+      </div>
+    </div>
+  )
 
   // ── HOST MODE: LOADING / ERROR ────────────────────────────────────────────
   if (screen === 'hostloading') return (
