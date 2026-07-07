@@ -10,11 +10,18 @@ function App() {
   const gameId = params.get('game')
 
   // If URL has ?game=XXX&role=player → show player view
+  // Optional &name=Sarah pre-fills the guest's name on the join screen
   if (role === 'player' && gameId) {
-    return <PlayerRoom gameId={gameId} />
+    return <PlayerRoom gameId={gameId} initialName={params.get('name') || ''} />
   }
 
-  // Otherwise → host dashboard
+  // ?game=XXX&role=host&key=SECRET → host view locked to one game
+  // (the customer can edit and run their game but not see the admin portal)
+  if (role === 'host' && gameId) {
+    return <HostDashboard hostGameId={gameId} hostAccessKey={params.get('key') || ''} />
+  }
+
+  // Otherwise → admin dashboard (all games)
   return <HostDashboard />
 }
 

@@ -8,6 +8,19 @@ function generateGameId() {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
 }
 
+function generateHostKey() {
+  return Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10)
+}
+
+// SHA-256 of the admin password — the password itself never appears in the code
+const ADMIN_PASSWORD_HASH = 'e22173b8c6cda8399e9de7c3a94e3b17d1394968b5a3cb8c5080544e8d2b1b79'
+const ADMIN_UNLOCK_STORAGE_KEY = 'wpt_admin_unlocked'
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
 const EMPTY_POST = { post: '', author: '', choices: ['', '', '', ''], questionImage: null, revealImage: null }
 
 const SAMPLE_QUESTIONS = [
@@ -16,8 +29,9 @@ const SAMPLE_QUESTIONS = [
   { id: 3, post: "Why do I always have the best ideas at 2am? Probably going to patent this tomorrow.", author: "Riley", choices: ["Alex", "Jordan", "Sam", "Riley"], questionImage: null, revealImage: null },
 ]
 
-export default function HostDashboard() {
-  const [screen, setScreen] = useState('home')
+export default function HostDashboard({ hostGameId = null, hostAccessKey = '' }) {
+  const isHostMode = !!hostGameId
+  const [screen, setScreen] = useState(isHostMode ? 'hostloading' : 'home')
   const [games, setGames] = useState([])
   const [currentGame, setCurrentGame] = useState(null)
   const [newPost, setNewPost] = useState(EMPTY_POST)
@@ -27,8 +41,38 @@ export default function HostDashboard() {
   const [saveError, setSaveError] = useState('')
   const [saving, setSaving] = useState(false)
   const [revealedMap, setRevealedMap] = useState({})
+  const [guestName, setGuestName] = useState('')
+  const [guestCopied, setGuestCopied] = useState(false)
+  const [hostCopied, setHostCopied] = useState(false)
+  const [unlocked, setUnlocked] = useState(isHostMode || localStorage.getItem(ADMIN_UNLOCK_STORAGE_KEY) === ADMIN_PASSWORD_HASH)
+  const [pwInput, setPwInput] = useState('')
+  const [pwError, setPwError] = useState('')
 
-  useEffect(() => { loadGames() }, [])
+  useEffect(() => { if (unlocked) loadGames() }, [unlocked])
+
+  async function tryUnlock() {
+    setPwError('')
+    if (await sha256Hex(pwInput) === ADMIN_PASSWORD_HASH) {
+      localStorage.setItem(ADMIN_UNLOCK_STORAGE_KEY, ADMIN_PASSWORD_HASH)
+      setUnlocked(true)
+    } else {
+      setPwError('Wrong password. Try again.')
+      setPwInput('')
+    }
+  }
+
+  // Host mode: load only the linked game and require a matching host key
+  useEffect(() => {
+    if (!isHostMode) return
+    ;(async () => {
+      const { data } = await supabase.from('games').select('data').eq('game_id', hostGameId).single()
+      const g = data?.data
+      if (!g || !g.hostKey || g.hostKey !== hostAccessKey) { setScreen('hosterror'); return }
+      setCurrentGame(g)
+      setGameTitle(g.title || '')
+      setScreen('manage')
+    })()
+  }, [])
 
   useEffect(() => {
     if (!currentGame?.theme) return
@@ -50,6 +94,7 @@ export default function HostDashboard() {
   }, [screen, currentGame?.id])
 
   async function loadGames() {
+    if (isHostMode) return
     const { data, error } = await supabase
       .from('games')
       .select('game_id, data')
@@ -81,7 +126,7 @@ export default function HostDashboard() {
 
   function startNewGame() {
     const id = generateGameId()
-    setCurrentGame({ id, title: '', theme: { ...DEFAULT_THEME }, questions: SAMPLE_QUESTIONS, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(), answers: {} })
+    setCurrentGame({ id, title: '', hostKey: generateHostKey(), theme: { ...DEFAULT_THEME }, questions: SAMPLE_QUESTIONS, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(), answers: {} })
     setGameTitle('')
     setNewPost(EMPTY_POST)
     setScreen('create')
@@ -98,7 +143,8 @@ export default function HostDashboard() {
 
   async function publishGame() {
     if (!gameTitle.trim() || currentGame.questions.length === 0) return
-    const game = { ...currentGame, title: gameTitle, status: 'lobby' }
+    // keep the existing status when editing a published game; new games are already 'lobby'
+    const game = { ...currentGame, title: gameTitle }
     await saveGame(game)
     if (!saveError) { setCurrentGame(game); setScreen('manage') }
   }
@@ -155,8 +201,32 @@ export default function HostDashboard() {
     return `${window.location.origin}/?game=${gameId}&role=player`
   }
 
+  function getGuestLink(gameId) {
+    return `${getGameLink(gameId)}&name=${encodeURIComponent(guestName.trim())}`
+  }
+
   async function copyLink(gameId) {
     try { await navigator.clipboard.writeText(getGameLink(gameId)); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch {}
+  }
+
+  async function copyGuestLink(gameId) {
+    if (!guestName.trim()) return
+    try { await navigator.clipboard.writeText(getGuestLink(gameId)); setGuestCopied(true); setTimeout(() => setGuestCopied(false), 2000) } catch {}
+  }
+
+  function getHostLink(game) {
+    return `${window.location.origin}/?game=${game.id}&role=host&key=${game.hostKey || ''}`
+  }
+
+  // Games created before host links exist get a key generated on first copy
+  async function copyHostLink() {
+    let game = currentGame
+    if (!game.hostKey) {
+      game = { ...game, hostKey: generateHostKey() }
+      await saveGame(game)
+      setCurrentGame(game)
+    }
+    try { await navigator.clipboard.writeText(getHostLink(game)); setHostCopied(true); setTimeout(() => setHostCopied(false), 2000) } catch {}
   }
 
   function computeScores(game) {
@@ -169,6 +239,47 @@ export default function HostDashboard() {
     })
     return Object.entries(scores).sort((a, b) => b[1] - a[1])
   }
+
+  // ── ADMIN LOCK SCREEN ─────────────────────────────────────────────────────
+  if (!isHostMode && !unlocked) return (
+    <div style={s.page}>
+      <div style={{ ...s.container, maxWidth: 380, textAlign: 'center', paddingTop: 100 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🔐</div>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Admin Access</div>
+        <div style={{ fontSize: 12, color: '#555', marginBottom: 28, letterSpacing: 1 }}>Enter the admin password to manage games.</div>
+        <input
+          type="password"
+          inputMode="numeric"
+          style={{ ...s.input, textAlign: 'center', fontSize: 20, letterSpacing: 8, marginBottom: 14 }}
+          placeholder="••••••"
+          value={pwInput}
+          onChange={e => setPwInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && tryUnlock()}
+          autoFocus
+        />
+        {pwError && <div style={{ color: '#ff6b6b', fontSize: 12, marginBottom: 14 }}>{pwError}</div>}
+        <button style={s.bigBtn} onClick={tryUnlock}>Unlock →</button>
+      </div>
+    </div>
+  )
+
+  // ── HOST MODE: LOADING / ERROR ────────────────────────────────────────────
+  if (screen === 'hostloading') return (
+    <div style={s.page}>
+      <div style={{ ...s.container, textAlign: 'center', paddingTop: 120 }}>
+        <div style={{ fontSize: 14, color: '#aaa', letterSpacing: 1 }}>Loading your game…</div>
+      </div>
+    </div>
+  )
+  if (screen === 'hosterror') return (
+    <div style={s.page}>
+      <div style={{ ...s.container, textAlign: 'center', paddingTop: 120 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>Invalid host link</div>
+        <div style={{ fontSize: 13, color: '#555', lineHeight: 1.6 }}>This link is missing or has the wrong host key.<br />Ask the game organizer to send you a fresh one.</div>
+      </div>
+    </div>
+  )
 
   // ── HOME ──────────────────────────────────────────────────────────────────
   if (screen === 'home') return (
@@ -214,12 +325,13 @@ export default function HostDashboard() {
   // ── CREATE ────────────────────────────────────────────────────────────────
   if (screen === 'create') {
     const theme = getTheme(currentGame)
+    const isPublished = isHostMode || games.some(g => g.id === currentGame.id)
     return (
     <div style={s.page}>
       <div style={s.container}>
         <div style={s.topBar}>
-          <button style={s.back} onClick={() => setScreen('home')}>← Back</button>
-          <div style={s.step}>GAME SETUP · {currentGame.id}</div>
+          <button style={s.back} onClick={() => setScreen(isPublished ? 'manage' : 'home')}>← {isPublished ? 'Back to Manage' : 'Back'}</button>
+          <div style={s.step}>{isPublished ? 'EDIT GAME' : 'GAME SETUP'} · {currentGame.id}</div>
         </div>
         <div style={s.tabs}>
           {['questions', 'customize', 'preview'].map(t => (
@@ -276,7 +388,7 @@ export default function HostDashboard() {
               style={{ ...s.bigBtn, marginTop: 24, opacity: (!gameTitle.trim() || currentGame.questions.length === 0 || saving) ? 0.4 : 1 }}
               onClick={publishGame}
               disabled={!gameTitle.trim() || currentGame.questions.length === 0 || saving}
-            >{saving ? 'Saving…' : 'Publish & Get Share Link →'}</button>
+            >{saving ? 'Saving…' : isPublished ? 'Save Changes →' : 'Publish & Get Share Link →'}</button>
           </>
         )}
 
@@ -397,13 +509,36 @@ export default function HostDashboard() {
       <div style={s.page}>
         <div style={s.container}>
           <div style={s.topBar}>
-            <button style={s.back} onClick={() => setScreen('home')}>← Home</button>
+            {isHostMode
+              ? <div style={{ ...s.step, color: '#ffd166' }}>YOU'RE THE HOST</div>
+              : <button style={s.back} onClick={() => setScreen('home')}>← Home</button>}
             <div style={s.step}>{currentGame.title}</div>
           </div>
           <div style={s.shareBox}>
             <div style={{ fontSize: 10, letterSpacing: 2, color: '#ffd166', marginBottom: 6 }}>SHARE WITH PLAYERS</div>
             <div style={{ fontSize: 12, color: '#aaa', wordBreak: 'break-all', marginBottom: 10, lineHeight: 1.5 }}>{getGameLink(currentGame.id)}</div>
             <button style={s.copyBtn} onClick={() => copyLink(currentGame.id)}>{copied ? '✓ Copied!' : 'Copy Link'}</button>
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #ffd16622' }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: '#ffd166', marginBottom: 6 }}>PERSONALIZED LINK</div>
+              <div style={{ fontSize: 11, color: '#555', marginBottom: 10 }}>Type a guest's name to make a link that pre-fills it on their join screen.</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input style={{ ...s.input, flex: 1 }} placeholder="Guest name, e.g. Sarah" value={guestName} onChange={e => { setGuestName(e.target.value); setGuestCopied(false) }} />
+                <button style={{ ...s.copyBtn, opacity: guestName.trim() ? 1 : 0.4, whiteSpace: 'nowrap' }} disabled={!guestName.trim()} onClick={() => copyGuestLink(currentGame.id)}>{guestCopied ? '✓ Copied!' : 'Copy'}</button>
+              </div>
+              {guestName.trim() && <div style={{ fontSize: 11, color: '#666', wordBreak: 'break-all', marginTop: 8, lineHeight: 1.5 }}>{getGuestLink(currentGame.id)}</div>}
+            </div>
+            {!isHostMode && (
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #ffd16622' }}>
+                <div style={{ fontSize: 10, letterSpacing: 2, color: '#00ff88', marginBottom: 6 }}>HOST LINK — FOR YOUR CUSTOMER</div>
+                <div style={{ fontSize: 11, color: '#555', marginBottom: 10 }}>Lets them edit and run this game without seeing your other games.</div>
+                {currentGame.hostKey && <div style={{ fontSize: 11, color: '#666', wordBreak: 'break-all', marginBottom: 8, lineHeight: 1.5 }}>{getHostLink(currentGame)}</div>}
+                <button style={{ ...s.copyBtn, background: '#00ff88' }} onClick={copyHostLink}>{hostCopied ? '✓ Copied!' : 'Copy Host Link'}</button>
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+            <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('questions'); setScreen('create') }}>✎ Edit Questions</button>
+            <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('customize'); setScreen('create') }}>🎨 Customize Theme</button>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
             <div style={{ fontSize: 12, letterSpacing: 2, fontWeight: 700 }}>
@@ -574,6 +709,7 @@ const s = {
   revealBox: { background: '#0d0d1a', border: '1px solid #00ff8822', borderRadius: 6, padding: 16, marginBottom: 12 },
   showRevealBtn: { width: '100%', padding: '13px 16px', background: '#00ff8822', color: '#00ff88', border: '1px solid #00ff8844', borderRadius: 4, cursor: 'pointer', fontSize: 14, fontWeight: 700, fontFamily: "'Courier New', monospace", letterSpacing: 1 },
   hideRevealBtn: { background: 'none', border: '1px solid #ff6b6b44', color: '#ff6b6b', borderRadius: 3, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontFamily: "'Courier New', monospace" },
+  editBtn: { flex: 1, padding: '12px 16px', background: '#111120', color: '#ffd166', border: '1px solid #ffd16644', borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 700, letterSpacing: 1, fontFamily: "'Courier New', monospace" },
   presetGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 },
   presetBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: '#111120', border: '1px solid #222', borderRadius: 6, padding: '14px 10px', cursor: 'pointer', fontFamily: "'Courier New', monospace" },
   colorSwatch: { width: 40, height: 40, padding: 0, border: '1px solid #222', borderRadius: 4, background: 'none', cursor: 'pointer' },
