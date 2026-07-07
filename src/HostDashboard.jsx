@@ -192,6 +192,16 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     setCurrentGame(g => ({ ...g, questions: g.questions.filter(q => q.id !== id) }))
   }
 
+  function moveQuestion(index, dir) {
+    setCurrentGame(g => {
+      const j = index + dir
+      if (j < 0 || j >= g.questions.length) return g
+      const qs = [...g.questions]
+      ;[qs[index], qs[j]] = [qs[j], qs[index]]
+      return { ...g, questions: qs }
+    })
+  }
+
   function updateChoice(i, val) {
     const c = [...newPost.choices]; c[i] = val
     setNewPost(p => ({ ...p, choices: c }))
@@ -359,9 +369,18 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                       {q.revealImage && <span style={chip('#00ff88')}>🎉 reveal img</span>}
                     </div>
                   </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <button style={{ ...s.arrowBtn, opacity: i === 0 ? 0.25 : 1 }} disabled={i === 0} onClick={() => moveQuestion(i, -1)} title="Move up">▲</button>
+                    <button style={{ ...s.arrowBtn, opacity: i === currentGame.questions.length - 1 ? 0.25 : 1 }} disabled={i === currentGame.questions.length - 1} onClick={() => moveQuestion(i, 1)} title="Move down">▼</button>
+                  </div>
                   <button style={s.x} onClick={() => removeQuestion(q.id)}>✕</button>
                 </div>
               ))}
+              {Object.keys(currentGame.answers || {}).length > 0 && (
+                <div style={{ fontSize: 11, color: '#ffd166', background: '#ffd16611', border: '1px solid #ffd16633', borderRadius: 4, padding: '10px 14px', marginTop: 4 }}>
+                  ⚠ Players have already answered some questions — reordering or removing questions now can mix up their scores. Best to reset the game after big changes.
+                </div>
+              )}
             </div>
 
             <div style={s.addBox}>
@@ -701,6 +720,7 @@ const s = {
   qText: { fontSize: 13, color: '#ddd', marginBottom: 4, fontStyle: 'italic' },
   qSub: { fontSize: 11, color: '#555' },
   x: { background: 'none', border: 'none', color: '#333', cursor: 'pointer', fontSize: 16 },
+  arrowBtn: { background: '#1a1a2e', border: '1px solid #2e2e3e', color: '#aaa', cursor: 'pointer', fontSize: 10, borderRadius: 3, padding: '4px 8px', lineHeight: 1 },
   prevCard: { background: '#111120', border: '1px solid #1e1e2e', borderRadius: 6, padding: 20, marginBottom: 14 },
   prevPost: { fontSize: 15, color: '#f0f0f0', fontStyle: 'italic', marginBottom: 16, lineHeight: 1.5 },
   shareBox: { background: '#111120', border: '1px solid #ffd16633', borderRadius: 6, padding: '16px 20px', marginBottom: 20 },
