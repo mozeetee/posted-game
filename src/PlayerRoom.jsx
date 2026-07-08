@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
-import { getTheme, ensureGoogleFont, withAlpha, contrastColor } from './theme'
+import { getTheme, ensureGoogleFont, withAlpha, contrastColor, getBrandParts } from './theme'
 
 export default function PlayerRoom({ gameId, initialName = '', mockGame = null, onExitMock = null }) {
   const isMock = !!mockGame
@@ -262,7 +262,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
             {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, marginBottom: 10, marginTop: 4, display: 'block' }} />}
             <div style={p.postText}>{q.post}</div>
           </div>
-          <div style={p.whoLabel}>WHO POSTED THIS?</div>
+          <div style={p.whoLabel}>{theme.questionLabel}</div>
           <div style={p.choiceGrid}>
             {q.choices.map(choice => {
               let bg = theme.cardColor, border = withAlpha(theme.textColor, 0.18), color = theme.textColor
@@ -389,7 +389,8 @@ function ThemedPage({ theme, children }) {
 
 function Logo({ theme, p }) {
   if (theme.logoImage) return <img src={theme.logoImage} alt="logo" style={p.logoImg} />
-  return <div style={p.logo}>WHO<span style={p.accent}>POSTED</span>THIS?</div>
+  const { lead, accent } = getBrandParts()
+  return <div style={p.logo}>{lead} <span style={p.accent}>{accent}</span></div>
 }
 
 function buildPlayerStyles(theme) {
@@ -397,7 +398,7 @@ function buildPlayerStyles(theme) {
   return {
     card: { width: '100%', maxWidth: 420, paddingTop: 40, position: 'relative', zIndex: 1 },
     playWrap: { width: '100%', maxWidth: 420, paddingTop: 20, position: 'relative', zIndex: 1 },
-    logo: { fontSize: 32, fontWeight: 900, letterSpacing: 4, color: text, fontFamily: headingFont, textAlign: 'center', marginBottom: 6 },
+    logo: { fontSize: 32, fontWeight: 900, letterSpacing: 4, color: text, fontFamily: headingFont, textAlign: 'center', marginBottom: 6, textTransform: 'uppercase' },
     logoImg: { maxWidth: 220, maxHeight: 110, objectFit: 'contain', display: 'block', margin: '0 auto 14px' },
     accent: { color: primary },
     sub: { textAlign: 'center', color: withAlpha(text, 0.45), fontSize: 12, letterSpacing: 2, marginBottom: 36 },

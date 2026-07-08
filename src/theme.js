@@ -1,8 +1,20 @@
 // Theme defaults, presets, and small color helpers shared by the host
 // dashboard (customizer) and the player room (renderer).
 
+export const BRAND_NAME = "That's So Them"
+export const BRAND_TAGLINE = "The party game where it's always SO them"
+
+// Splits the brand name into a leading part and an accent-colored last word,
+// e.g. for the logo treatment: "THAT'S SO" + accented "THEM".
+export function getBrandParts() {
+  const words = BRAND_NAME.split(' ')
+  const last = words.pop()
+  return { lead: words.join(' '), accent: last }
+}
+
 export const DEFAULT_THEME = {
-  tagline: "The party game where nobody's anonymous",
+  tagline: BRAND_TAGLINE,
+  questionLabel: 'WHO POSTED THIS?',
   primaryColor: '#ffd166',
   secondaryColor: '#00ff88',
   backgroundColor: '#0a0a12',

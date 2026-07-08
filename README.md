@@ -1,6 +1,6 @@
-# Who Posted This? 🎲
+# That's So Them 🎲
 
-A real-time party trivia game. Guess who made the post!
+A real-time, fully customizable party guessing game. Bring your own questions, colors, fonts, and photos — guests guess who's behind each one.
 
 ---
 
@@ -10,7 +10,7 @@ A real-time party trivia game. Guess who made the post!
 
 1. Go to **https://supabase.com** and sign up (free)
 2. Click **"New project"**
-3. Give it a name (e.g. `who-posted-this`), set a database password, pick any region
+3. Give it a name (e.g. `thats-so-them`), set a database password, pick any region
 4. Wait ~2 minutes for it to provision
 
 ### Step 2 — Set up the database tables
@@ -37,16 +37,16 @@ A real-time party trivia game. Guess who made the post!
 
 1. Go to **https://github.com** and sign up / log in
 2. Click **"New repository"**
-3. Name it `who-posted-this`, make it **Public**, click Create
+3. Name it `thats-so-them`, make it **Public**, click Create
 4. Follow GitHub's instructions to push this folder:
 
 ```bash
-cd who-posted-this        # this project folder
+cd thats-so-them        # this project folder
 git init
 git add .
 git commit -m "initial commit"
 git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/who-posted-this.git
+git remote add origin https://github.com/YOUR_USERNAME/thats-so-them.git
 git push -u origin main
 ```
 
@@ -54,7 +54,7 @@ git push -u origin main
 
 1. Go to **https://netlify.com** and sign up (free) — use your GitHub account
 2. Click **"Add new site" → "Import an existing project"**
-3. Choose **GitHub** → select your `who-posted-this` repo
+3. Choose **GitHub** → select your `thats-so-them` repo
 4. Build settings should auto-detect. If not, set:
    - **Build command:** `npm run build`
    - **Publish directory:** `dist`

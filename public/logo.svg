@@ -1,0 +1,14 @@
+<svg viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg">
+  <rect width="480" height="480" rx="72" fill="#0a0a12"/>
+  <rect x="10" y="10" width="460" height="460" rx="64" fill="none" stroke="#ffd166" stroke-width="3" opacity="0.35"/>
+
+  <text x="240" y="188" text-anchor="middle" font-family="'Poppins', Arial, sans-serif" font-weight="700" font-size="38" letter-spacing="7" fill="#f0f0f0">THAT'S SO</text>
+  <text x="240" y="288" text-anchor="middle" font-family="'Poppins', Arial, sans-serif" font-weight="900" font-size="92" fill="#ffd166">THEM</text>
+
+  <!-- winking face accent -->
+  <g transform="translate(240,368)">
+    <path d="M -46 -6 Q -34 -18 -22 -6" stroke="#00ff88" stroke-width="9" fill="none" stroke-linecap="round"/>
+    <circle cx="28" cy="-6" r="9" fill="#00ff88"/>
+    <path d="M -34 24 Q 0 46 34 24" stroke="#00ff88" stroke-width="9" fill="none" stroke-linecap="round"/>
+  </g>
+</svg>
