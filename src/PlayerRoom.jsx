@@ -14,6 +14,7 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
   const [revealImageVisible, setRevealImageVisible] = useState(false)
   const [myAnswers, setMyAnswers] = useState({})
   const channelRef = useRef(null)
+  const gameRef = useRef(null)
 
   const theme = getTheme(game)
   const p = buildPlayerStyles(theme)
@@ -86,6 +87,24 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
     if (game && gameId) checkReveal(gameId)
   }, [game?.currentQuestion])
 
+  useEffect(() => { gameRef.current = game }, [game])
+
+  // Poll as a fallback in case Supabase Realtime isn't delivering postgres_changes
+  // events (e.g. replication isn't enabled for these tables in this project).
+  useEffect(() => {
+    if (phase === 'join') return
+    const poll = setInterval(async () => {
+      const { data } = await supabase.from('games').select('data').eq('game_id', gameId).single()
+      if (data?.data) handleGameUpdate(data.data)
+      const g = gameRef.current
+      if (g) {
+        const { data: rv } = await supabase.from('reveals').select('question_idx').eq('game_id', gameId).eq('question_idx', g.currentQuestion)
+        setRevealImageVisible(!!(rv && rv.length > 0))
+      }
+    }, 2500)
+    return () => clearInterval(poll)
+  }, [phase, gameId])
+
   async function joinGame() {
     setError('')
     if (!playerName.trim()) { setError('Enter your name.'); return }
@@ -149,10 +168,6 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
         <div style={p.field}>
           <label style={p.label}>YOUR NAME</label>
           <input style={p.input} placeholder="How should we call you?" value={playerName} onChange={e => setPlayerName(e.target.value)} onKeyDown={e => e.key === 'Enter' && joinGame()} autoFocus />
-        </div>
-        <div style={p.field}>
-          <label style={p.label}>GAME CODE</label>
-          <div style={{ ...p.input, fontSize: 22, letterSpacing: 6, textAlign: 'center', color: theme.primaryColor }}>{gameId}</div>
         </div>
         {error && <div style={p.err}>{error}</div>}
         <button style={p.joinBtn} onClick={joinGame}>Join Game →</button>
@@ -234,6 +249,18 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
           )}
           {submitted && !revealImageVisible && q.revealImage && (
             <div style={{ textAlign: 'center', color: withAlpha(theme.textColor, 0.2), fontSize: 11, letterSpacing: 1, marginTop: 20 }}>Waiting for host reveal…</div>
+          )}
+          {submitted && revealed && (game.players || []).length > 0 && (
+            <div style={p.lbBox}>
+              <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>SCOREBOARD SO FAR</div>
+              {computeAllScores(game).map(([name, score], i) => (
+                <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', borderRadius: 4, background: name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
+                  <span style={{ width: 24, fontSize: 14, textAlign: 'center' }}>{['🏆', '🥈', '🥉'][i] || `#${i + 1}`}</span>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: name === playerName ? theme.primaryColor : theme.textColor }}>{name}</span>
+                  <span style={{ fontSize: 13, color: theme.primaryColor }}>{score} pt{score !== 1 ? 's' : ''}</span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </ThemedPage>

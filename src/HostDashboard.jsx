@@ -95,6 +95,19 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     return () => supabase.removeChannel(channel)
   }, [screen, currentGame?.id])
 
+  // Poll as a fallback in case Supabase Realtime isn't delivering postgres_changes
+  // events (e.g. replication isn't enabled for these tables in this project) — this
+  // is how the host sees player answers land in the live scoreboard.
+  useEffect(() => {
+    if (screen !== 'manage' || !currentGame) return
+    const gameId = currentGame.id
+    const poll = setInterval(async () => {
+      const { data } = await supabase.from('games').select('data').eq('game_id', gameId).single()
+      if (data?.data) setCurrentGame(data.data)
+    }, 2500)
+    return () => clearInterval(poll)
+  }, [screen, currentGame?.id])
+
   async function loadGames() {
     if (isHostMode) return
     const { data, error } = await supabase
