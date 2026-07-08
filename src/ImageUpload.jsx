@@ -1,4 +1,5 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
+import { CropModal } from './ImageCrop'
 
 export function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -27,18 +28,32 @@ export async function compressImage(dataUrl, maxDim = 900) {
   })
 }
 
-export function ImageUploadSlot({ label, hint, value, onChange, accentColor = '#ffd166', maxDim = 900 }) {
+// Pass cropAspect (e.g. 1 for square) to require cropping to a fixed ratio before
+// the image is saved — this guarantees the framing the host picks is exactly what
+// players see everywhere the image is displayed. Omit it for images that are shown
+// with objectFit:'contain' or as a full-bleed background, where cropping doesn't apply.
+export function ImageUploadSlot({ label, hint, value, onChange, accentColor = '#ffd166', maxDim = 900, cropAspect = null }) {
   const inputRef = useRef(null)
+  const [cropSrc, setCropSrc] = useState(null)
 
   async function processFile(file) {
     if (!file || !file.type.startsWith('image/')) return
     const raw = await readFileAsDataUrl(file)
-    const compressed = await compressImage(raw, maxDim)
-    onChange(compressed)
+    if (cropAspect) {
+      setCropSrc(raw)
+    } else {
+      const compressed = await compressImage(raw, maxDim)
+      onChange(compressed)
+    }
   }
 
   function handleInput(e) { processFile(e.target.files?.[0]); e.target.value = '' }
   function handleDrop(e) { e.preventDefault(); processFile(e.dataTransfer.files?.[0]) }
+
+  function handleCropConfirm(dataUrl) {
+    setCropSrc(null)
+    onChange(dataUrl)
+  }
 
   return (
     <div style={{ marginBottom: 18 }}>
@@ -48,8 +63,20 @@ export function ImageUploadSlot({ label, hint, value, onChange, accentColor = '#
       {hint && <div style={{ fontSize: 11, color: '#444', marginBottom: 8 }}>{hint}</div>}
       {value ? (
         <div style={{ position: 'relative' }}>
-          <img src={value} alt="uploaded" style={{ width: '100%', maxHeight: 200, objectFit: 'cover', borderRadius: 6, display: 'block', border: `1px solid ${accentColor}33` }} />
+          <img
+            src={value}
+            alt="uploaded"
+            style={{
+              width: '100%',
+              ...(cropAspect ? { aspectRatio: String(cropAspect) } : { maxHeight: 200 }),
+              objectFit: 'cover',
+              borderRadius: 6,
+              display: 'block',
+              border: `1px solid ${accentColor}33`,
+            }}
+          />
           <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
+            {cropAspect && <button onClick={() => setCropSrc(value)} style={miniBtn('#1a1a2e', '#ffd166')}>✂ Recrop</button>}
             <button onClick={() => inputRef.current?.click()} style={miniBtn('#1a1a2e', '#aaa')}>↺ Replace</button>
             <button onClick={() => onChange(null)} style={miniBtn('#2a0a0a', '#ff6b6b')}>✕ Remove</button>
           </div>
@@ -64,9 +91,12 @@ export function ImageUploadSlot({ label, hint, value, onChange, accentColor = '#
         >
           <div style={{ fontSize: 26, marginBottom: 6 }}>🖼️</div>
           <div style={{ fontSize: 12, color: '#555' }}>Click to upload or drag & drop</div>
-          <div style={{ fontSize: 10, color: '#333', marginTop: 3 }}>PNG · JPG · GIF · WEBP</div>
+          <div style={{ fontSize: 10, color: '#333', marginTop: 3 }}>PNG · JPG · GIF · WEBP{cropAspect ? ' · crop before saving' : ''}</div>
           <input ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleInput} />
         </div>
+      )}
+      {cropSrc && (
+        <CropModal imageSrc={cropSrc} aspect={cropAspect} maxDim={maxDim} onConfirm={handleCropConfirm} onCancel={() => setCropSrc(null)} />
       )}
     </div>
   )

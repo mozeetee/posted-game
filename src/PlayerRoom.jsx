@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import { getTheme, ensureGoogleFont, withAlpha, contrastColor } from './theme'
 
-export default function PlayerRoom({ gameId, initialName = '' }) {
+export default function PlayerRoom({ gameId, initialName = '', mockGame = null, onExitMock = null }) {
+  const isMock = !!mockGame
   const [phase, setPhase] = useState('join')
-  const [playerName, setPlayerName] = useState(initialName)
-  const [game, setGame] = useState(null)
+  const [playerName, setPlayerName] = useState(initialName || (isMock ? 'Preview' : ''))
+  const [game, setGame] = useState(() => isMock ? { ...mockGame, currentQuestion: 0, status: 'active', players: [], answers: {} } : null)
   const [error, setError] = useState('')
   const [selectedAnswer, setSelectedAnswer] = useState(null)
   const [submitted, setSubmitted] = useState(false)
@@ -21,6 +22,7 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
 
   // Fetch the game up front (before joining) so the join screen is themed too.
   useEffect(() => {
+    if (isMock) return
     let cancelled = false
     async function loadPreview() {
       const { data } = await supabase.from('games').select('data').eq('game_id', gameId).single()
@@ -84,6 +86,7 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
 
   // Re-check reveal when question changes
   useEffect(() => {
+    if (isMock) return
     if (game && gameId) checkReveal(gameId)
   }, [game?.currentQuestion])
 
@@ -92,7 +95,7 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
   // Poll as a fallback in case Supabase Realtime isn't delivering postgres_changes
   // events (e.g. replication isn't enabled for these tables in this project).
   useEffect(() => {
-    if (phase === 'join') return
+    if (isMock || phase === 'join') return
     const poll = setInterval(async () => {
       const { data } = await supabase.from('games').select('data').eq('game_id', gameId).single()
       if (data?.data) handleGameUpdate(data.data)
@@ -108,6 +111,14 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
   async function joinGame() {
     setError('')
     if (!playerName.trim()) { setError('Enter your name.'); return }
+
+    if (isMock) {
+      setGame(g => ({ ...g, players: [{ name: playerName.trim(), joinedAt: Date.now() }] }))
+      setLastQuestionIdx(0)
+      setPhase('playing')
+      return
+    }
+
     const { data, error: fetchErr } = await supabase.from('games').select('data').eq('game_id', gameId).single()
     if (fetchErr || !data) { setError('Game not found. Check your link.'); return }
 
@@ -130,6 +141,14 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
     setSelectedAnswer(answer)
     setSubmitted(true)
     const key = `${playerName.trim()}:::${game.currentQuestion}`
+
+    if (isMock) {
+      setGame(g => ({ ...g, answers: { ...(g.answers || {}), [key]: answer } }))
+      setMyAnswers(prev => ({ ...prev, [game.currentQuestion]: answer }))
+      setTimeout(() => { setRevealed(true); setRevealImageVisible(true) }, 700)
+      return
+    }
+
     const { data } = await supabase.from('games').select('data').eq('game_id', gameId).single()
     if (!data) return
     const g = data.data
@@ -138,6 +157,34 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
     setGame(updated)
     setMyAnswers(prev => ({ ...prev, [game.currentQuestion]: answer }))
     setTimeout(() => setRevealed(true), 700)
+  }
+
+  function advanceMockQuestion() {
+    setGame(g => {
+      const next = g.currentQuestion + 1
+      if (next >= g.questions.length) {
+        setPhase('finished')
+        return { ...g, status: 'finished' }
+      }
+      return { ...g, currentQuestion: next }
+    })
+    setSelectedAnswer(null)
+    setSubmitted(false)
+    setRevealed(false)
+    setRevealImageVisible(false)
+  }
+
+  function wrapMock(node) {
+    if (!isMock) return node
+    return (
+      <div>
+        <div style={mockBanner}>
+          <span>🎮 PREVIEW MODE — nothing here is saved or seen by real players</span>
+          <button onClick={onExitMock} style={mockExitBtn}>✕ Exit Preview</button>
+        </div>
+        {node}
+      </div>
+    )
   }
 
   function computeMyScore(g) {
@@ -160,7 +207,7 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
   }
 
   // ── JOIN ──────────────────────────────────────────────────────────────────
-  if (phase === 'join') return (
+  if (phase === 'join') return wrapMock(
     <ThemedPage theme={theme}>
       <div style={p.card}>
         <Logo theme={theme} p={p} />
@@ -176,7 +223,7 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
   )
 
   // ── LOBBY ─────────────────────────────────────────────────────────────────
-  if (phase === 'lobby') return (
+  if (phase === 'lobby') return wrapMock(
     <ThemedPage theme={theme}>
       <div style={p.card}>
         {theme.logoImage && <img src={theme.logoImage} alt="logo" style={p.logoImg} />}
@@ -198,10 +245,10 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
   // ── PLAYING ───────────────────────────────────────────────────────────────
   if (phase === 'playing' && game) {
     const q = game.questions[game.currentQuestion]
-    if (!q) return <ThemedPage theme={theme}><div style={p.card}><div style={p.waiting}>Loading…</div></div></ThemedPage>
+    if (!q) return wrapMock(<ThemedPage theme={theme}><div style={p.card}><div style={p.waiting}>Loading…</div></div></ThemedPage>)
     const isCorrect = submitted && selectedAnswer === q.author
 
-    return (
+    return wrapMock(
       <ThemedPage theme={theme}>
         <div style={p.playWrap}>
           <div style={p.progressRow}>
@@ -212,7 +259,7 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
           </div>
           <div style={p.bubble}>
             <div style={p.handle}>@someone</div>
-            {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 8, marginBottom: 10, marginTop: 4 }} />}
+            {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, marginBottom: 10, marginTop: 4, display: 'block' }} />}
             <div style={p.postText}>{q.post}</div>
           </div>
           <div style={p.whoLabel}>WHO POSTED THIS?</div>
@@ -244,7 +291,7 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
           {submitted && revealImageVisible && q.revealImage && (
             <div style={p.revealBox}>
               <div style={p.revealLabel}>🎉 HOST REVEAL</div>
-              <img src={q.revealImage} alt="reveal" style={{ width: '100%', maxHeight: 260, objectFit: 'cover', borderRadius: 8, border: `1px solid ${withAlpha(theme.secondaryColor, 0.27)}` }} />
+              <img src={q.revealImage} alt="reveal" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, border: `1px solid ${withAlpha(theme.secondaryColor, 0.27)}`, display: 'block' }} />
             </div>
           )}
           {submitted && !revealImageVisible && q.revealImage && (
@@ -262,6 +309,11 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
               ))}
             </div>
           )}
+          {isMock && submitted && revealed && (
+            <button style={p.joinBtn} onClick={advanceMockQuestion}>
+              {game.currentQuestion + 1 >= game.questions.length ? 'Finish Preview →' : 'Next Question →'}
+            </button>
+          )}
         </div>
       </ThemedPage>
     )
@@ -274,7 +326,7 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
     const myRank = allScores.findIndex(([name]) => name === playerName) + 1
     const total = game.questions.length
 
-    return (
+    return wrapMock(
       <ThemedPage theme={theme}>
         <div style={p.card}>
           {theme.logoImage && <img src={theme.logoImage} alt="logo" style={p.logoImg} />}
@@ -303,7 +355,7 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
               return (
                 <div key={i} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${withAlpha(theme.textColor, 0.1)}` }}>
                   <div style={{ fontSize: 12, color: withAlpha(theme.textColor, 0.5), fontStyle: 'italic', marginBottom: 4 }}>"{q.post.substring(0, 65)}{q.post.length > 65 ? '…' : ''}"</div>
-                  {q.revealImage && <img src={q.revealImage} alt="" style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: 4, marginBottom: 6, opacity: 0.8 }} />}
+                  {q.revealImage && <img src={q.revealImage} alt="" style={{ width: 140, aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 4, marginBottom: 6, opacity: 0.8, display: 'block' }} />}
                   <div style={{ fontSize: 12, fontWeight: 700, color: correct ? theme.secondaryColor : '#ff6b6b' }}>
                     {correct ? '✓' : '✗'} {myAns || '—'} {!correct && `(was: ${q.author})`}
                   </div>
@@ -316,8 +368,11 @@ export default function PlayerRoom({ gameId, initialName = '' }) {
     )
   }
 
-  return <ThemedPage theme={theme}><div style={p.card}><div style={p.waiting}>Loading…</div></div></ThemedPage>
+  return wrapMock(<ThemedPage theme={theme}><div style={p.card}><div style={p.waiting}>Loading…</div></div></ThemedPage>)
 }
+
+const mockBanner = { position: 'sticky', top: 0, zIndex: 2000, background: '#000', color: '#ffd166', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontFamily: "'Courier New', monospace", fontSize: 11, letterSpacing: 0.5, borderBottom: '2px solid #ffd166' }
+const mockExitBtn = { background: '#ffd166', color: '#111', border: 'none', borderRadius: 3, padding: '6px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 900, letterSpacing: 1, fontFamily: "'Courier New', monospace", whiteSpace: 'nowrap' }
 
 function ThemedPage({ theme, children }) {
   return (

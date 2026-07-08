@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import { ImageUploadSlot } from './ImageUpload'
 import { compressImage, readFileAsDataUrl } from './ImageUpload'
 import { DEFAULT_THEME, THEME_PRESETS, FONT_OPTIONS, getTheme, ensureGoogleFont, withAlpha, contrastColor } from './theme'
+import PlayerRoom from './PlayerRoom'
 
 function generateGameId() {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
@@ -49,6 +50,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [pwError, setPwError] = useState('')
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState(null)
+  const [mockReturnScreen, setMockReturnScreen] = useState('manage')
 
   useEffect(() => { if (unlocked) loadGames() }, [unlocked])
 
@@ -148,6 +150,12 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     setEditDraft(null)
     setScreen('create')
     setActiveTab('questions')
+  }
+
+  function startMockPreview(fromScreen) {
+    if (!currentGame || currentGame.questions.length === 0) return
+    setMockReturnScreen(fromScreen)
+    setScreen('mockplay')
   }
 
   function updateTheme(patch) {
@@ -429,8 +437,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                       <label style={s.label}>THE POST / MESSAGE</label>
                       <textarea style={s.textarea} value={editDraft.post} onChange={e => setEditDraft(d => ({ ...d, post: e.target.value }))} />
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 4 }}>
-                        <ImageUploadSlot label="QUESTION IMAGE" hint="Shown while players are guessing" value={editDraft.questionImage} onChange={v => setEditDraft(d => ({ ...d, questionImage: v }))} accentColor="#ffd166" />
-                        <ImageUploadSlot label="REVEAL IMAGE" hint="Shown after everyone answers" value={editDraft.revealImage} onChange={v => setEditDraft(d => ({ ...d, revealImage: v }))} accentColor="#00ff88" />
+                        <ImageUploadSlot label="QUESTION IMAGE" hint="Shown while players are guessing" value={editDraft.questionImage} onChange={v => setEditDraft(d => ({ ...d, questionImage: v }))} accentColor="#ffd166" cropAspect={1} />
+                        <ImageUploadSlot label="REVEAL IMAGE" hint="Shown after everyone answers" value={editDraft.revealImage} onChange={v => setEditDraft(d => ({ ...d, revealImage: v }))} accentColor="#00ff88" cropAspect={1} />
                       </div>
                       <label style={s.label}>WHO ACTUALLY POSTED IT?</label>
                       <input style={{ ...s.input, marginBottom: 16 }} placeholder="Must exactly match one choice" value={editDraft.author} onChange={e => setEditDraft(d => ({ ...d, author: e.target.value }))} />
@@ -448,7 +456,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                   ) : (
                     <>
                       <div style={{ flex: 1 }}>
-                        {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', maxHeight: 80, objectFit: 'cover', borderRadius: 4, marginBottom: 6 }} />}
+                        {q.questionImage && <img src={q.questionImage} alt="" style={{ width: 80, aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 4, marginBottom: 6 }} />}
                         <div style={s.qText}>"{q.post}"</div>
                         <div style={s.qSub}>✓ {q.author} · {q.choices.join(', ')}</div>
                         <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
@@ -478,8 +486,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               <label style={s.label}>THE POST / MESSAGE</label>
               <textarea style={s.textarea} placeholder="Paste the social media post or message here..." value={newPost.post} onChange={e => setNewPost(p => ({ ...p, post: e.target.value }))} />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 4 }}>
-                <ImageUploadSlot label="QUESTION IMAGE" hint="Shown while players are guessing" value={newPost.questionImage} onChange={v => setNewPost(p => ({ ...p, questionImage: v }))} accentColor="#ffd166" />
-                <ImageUploadSlot label="REVEAL IMAGE" hint="Shown after everyone answers" value={newPost.revealImage} onChange={v => setNewPost(p => ({ ...p, revealImage: v }))} accentColor="#00ff88" />
+                <ImageUploadSlot label="QUESTION IMAGE" hint="Shown while players are guessing" value={newPost.questionImage} onChange={v => setNewPost(p => ({ ...p, questionImage: v }))} accentColor="#ffd166" cropAspect={1} />
+                <ImageUploadSlot label="REVEAL IMAGE" hint="Shown after everyone answers" value={newPost.revealImage} onChange={v => setNewPost(p => ({ ...p, revealImage: v }))} accentColor="#00ff88" cropAspect={1} />
               </div>
               <label style={s.label}>WHO ACTUALLY POSTED IT?</label>
               <input style={{ ...s.input, marginBottom: 16 }} placeholder="Must exactly match one choice" value={newPost.author} onChange={e => setNewPost(p => ({ ...p, author: e.target.value }))} />
@@ -575,11 +583,12 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
 
         {activeTab === 'preview' && (
           <div>
+            <button style={{ ...s.bigBtn, marginBottom: 28 }} onClick={() => startMockPreview('create')}>🎮 Play as a Guest (Preview)</button>
             <h2 style={s.sectionTitle}>PREVIEW</h2>
             {currentGame.questions.map((q, i) => (
               <div key={q.id} style={s.prevCard}>
                 <div style={{ fontSize: 10, letterSpacing: 2, color: '#555', marginBottom: 10 }}>Question {i + 1}</div>
-                {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 6, marginBottom: 12, border: '1px solid #ffd16633' }} />}
+                {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', maxWidth: 400, aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 6, marginBottom: 12, border: '1px solid #ffd16633', display: 'block' }} />}
                 <div style={s.prevPost}>"{q.post}"</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
                   {q.choices.map(c => (
@@ -591,7 +600,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                 {q.revealImage && (
                   <div style={{ marginTop: 12 }}>
                     <div style={{ fontSize: 10, letterSpacing: 2, color: '#00ff88', marginBottom: 6 }}>🎉 REVEAL IMAGE</div>
-                    <img src={q.revealImage} alt="" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 6, border: '1px solid #00ff8833' }} />
+                    <img src={q.revealImage} alt="" style={{ width: '100%', maxWidth: 400, aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 6, border: '1px solid #00ff8833', display: 'block' }} />
                   </div>
                 )}
               </div>
@@ -648,10 +657,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('questions'); setScreen('create') }}>✎ Edit Questions</button>
             <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('customize'); setScreen('create') }}>🎨 Customize Theme</button>
           </div>
+          <button style={{ ...s.bigBtn, marginBottom: 20 }} onClick={() => startMockPreview('manage')}>🎮 Play as a Guest (Preview)</button>
 
           {personStats.length > 0 && (
             <div style={s.section}>
@@ -704,7 +714,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               {q.questionImage && (
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 10, letterSpacing: 2, color: '#ffd166', marginBottom: 6 }}>📷 QUESTION IMAGE</div>
-                  <img src={q.questionImage} alt="" style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 6, border: '1px solid #ffd16633' }} />
+                  <img src={q.questionImage} alt="" style={{ width: '100%', maxWidth: 400, aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 6, border: '1px solid #ffd16633', display: 'block' }} />
                 </div>
               )}
               <div style={{ fontSize: 15, fontStyle: 'italic', color: '#f0f0f0', lineHeight: 1.6, marginBottom: 10 }}>"{q.post}"</div>
@@ -717,7 +727,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                   <div style={{ fontSize: 10, letterSpacing: 2, color: '#00ff88', marginBottom: 8 }}>🎉 REVEAL IMAGE</div>
                   {isRevealed ? (
                     <>
-                      <img src={q.revealImage} alt="reveal" style={{ width: '100%', maxHeight: 200, objectFit: 'cover', borderRadius: 6, marginBottom: 10, border: '1px solid #00ff8844' }} />
+                      <img src={q.revealImage} alt="reveal" style={{ width: '100%', maxWidth: 400, aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 6, marginBottom: 10, border: '1px solid #00ff8844', display: 'block' }} />
                       <div style={{ fontSize: 11, color: '#00ff88', marginBottom: 8 }}>✓ Players can see this image now</div>
                       <button style={s.hideRevealBtn} onClick={() => toggleReveal(qIdx)}>Hide Reveal Image</button>
                     </>
@@ -759,6 +769,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
         </div>
       </div>
     )
+  }
+
+  // ── MOCK PREVIEW ──────────────────────────────────────────────────────────
+  if (screen === 'mockplay' && currentGame) {
+    return <PlayerRoom gameId={currentGame.id} mockGame={currentGame} onExitMock={() => setScreen(mockReturnScreen)} />
   }
 
   return null
