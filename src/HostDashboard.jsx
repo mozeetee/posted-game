@@ -47,6 +47,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [unlocked, setUnlocked] = useState(isHostMode || localStorage.getItem(ADMIN_UNLOCK_STORAGE_KEY) === ADMIN_PASSWORD_HASH)
   const [pwInput, setPwInput] = useState('')
   const [pwError, setPwError] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [editDraft, setEditDraft] = useState(null)
 
   useEffect(() => { if (unlocked) loadGames() }, [unlocked])
 
@@ -129,6 +131,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     setCurrentGame({ id, title: '', hostKey: generateHostKey(), theme: { ...DEFAULT_THEME }, questions: SAMPLE_QUESTIONS, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(), answers: {} })
     setGameTitle('')
     setNewPost(EMPTY_POST)
+    setEditingId(null)
+    setEditDraft(null)
     setScreen('create')
     setActiveTab('questions')
   }
@@ -202,6 +206,36 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     })
   }
 
+  function startEditQuestion(q) {
+    const choices = [...q.choices]
+    while (choices.length < 4) choices.push('')
+    setEditingId(q.id)
+    setEditDraft({ ...q, choices })
+  }
+
+  function cancelEditQuestion() {
+    setEditingId(null)
+    setEditDraft(null)
+  }
+
+  function updateEditChoice(i, val) {
+    setEditDraft(d => {
+      const c = [...d.choices]; c[i] = val
+      return { ...d, choices: c }
+    })
+  }
+
+  function saveEditQuestion() {
+    if (!editDraft.post.trim() || !editDraft.author.trim()) return
+    const filledChoices = editDraft.choices.filter(c => c.trim())
+    if (filledChoices.length < 2) return
+    setCurrentGame(g => ({
+      ...g,
+      questions: g.questions.map(q => q.id === editingId ? { ...editDraft, choices: filledChoices } : q),
+    }))
+    cancelEditQuestion()
+  }
+
   function updateChoice(i, val) {
     const c = [...newPost.choices]; c[i] = val
     setNewPost(p => ({ ...p, choices: c }))
@@ -248,6 +282,23 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
       if (q && answer === q.author) scores[pName] = (scores[pName] || 0) + 1
     })
     return Object.entries(scores).sort((a, b) => b[1] - a[1])
+  }
+
+  // How often each person shows up as an answer choice vs. is the correct answer,
+  // so the host can spot lopsided questions and keep the game unpredictable.
+  function computePersonStats(game) {
+    const stats = {}
+    ;(game.questions || []).forEach(q => {
+      ;(q.choices || []).forEach(c => {
+        if (!stats[c]) stats[c] = { featured: 0, correct: 0 }
+        stats[c].featured++
+      })
+      if (q.author) {
+        if (!stats[q.author]) stats[q.author] = { featured: 0, correct: 0 }
+        stats[q.author].correct++
+      }
+    })
+    return Object.entries(stats).sort((a, b) => b[1].correct - a[1].correct)
   }
 
   // ── ADMIN LOCK SCREEN ─────────────────────────────────────────────────────
@@ -360,25 +411,51 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               {currentGame.questions.map((q, i) => (
                 <div key={q.id} style={s.qRow}>
                   <div style={s.qNum}>Q{i + 1}</div>
-                  <div style={{ flex: 1 }}>
-                    {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', maxHeight: 80, objectFit: 'cover', borderRadius: 4, marginBottom: 6 }} />}
-                    <div style={s.qText}>"{q.post}"</div>
-                    <div style={s.qSub}>✓ {q.author} · {q.choices.join(', ')}</div>
-                    <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-                      {q.questionImage && <span style={chip('#ffd166')}>📷 question img</span>}
-                      {q.revealImage && <span style={chip('#00ff88')}>🎉 reveal img</span>}
+                  {editingId === q.id ? (
+                    <div style={{ flex: 1 }}>
+                      <label style={s.label}>THE POST / MESSAGE</label>
+                      <textarea style={s.textarea} value={editDraft.post} onChange={e => setEditDraft(d => ({ ...d, post: e.target.value }))} />
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 4 }}>
+                        <ImageUploadSlot label="QUESTION IMAGE" hint="Shown while players are guessing" value={editDraft.questionImage} onChange={v => setEditDraft(d => ({ ...d, questionImage: v }))} accentColor="#ffd166" />
+                        <ImageUploadSlot label="REVEAL IMAGE" hint="Shown after everyone answers" value={editDraft.revealImage} onChange={v => setEditDraft(d => ({ ...d, revealImage: v }))} accentColor="#00ff88" />
+                      </div>
+                      <label style={s.label}>WHO ACTUALLY POSTED IT?</label>
+                      <input style={{ ...s.input, marginBottom: 16 }} placeholder="Must exactly match one choice" value={editDraft.author} onChange={e => setEditDraft(d => ({ ...d, author: e.target.value }))} />
+                      <label style={s.label}>ANSWER CHOICES (2–4)</label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+                        {editDraft.choices.map((c, ci) => (
+                          <input key={ci} style={s.input} placeholder={`Choice ${ci + 1}`} value={c} onChange={e => updateEditChoice(ci, e.target.value)} />
+                        ))}
+                      </div>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <button style={s.addBtn} onClick={saveEditQuestion}>✓ Save Question</button>
+                        <button style={s.ghost} onClick={cancelEditQuestion}>Cancel</button>
+                      </div>
                     </div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <button style={{ ...s.arrowBtn, opacity: i === 0 ? 0.25 : 1 }} disabled={i === 0} onClick={() => moveQuestion(i, -1)} title="Move up">▲</button>
-                    <button style={{ ...s.arrowBtn, opacity: i === currentGame.questions.length - 1 ? 0.25 : 1 }} disabled={i === currentGame.questions.length - 1} onClick={() => moveQuestion(i, 1)} title="Move down">▼</button>
-                  </div>
-                  <button style={s.x} onClick={() => removeQuestion(q.id)}>✕</button>
+                  ) : (
+                    <>
+                      <div style={{ flex: 1 }}>
+                        {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', maxHeight: 80, objectFit: 'cover', borderRadius: 4, marginBottom: 6 }} />}
+                        <div style={s.qText}>"{q.post}"</div>
+                        <div style={s.qSub}>✓ {q.author} · {q.choices.join(', ')}</div>
+                        <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+                          {q.questionImage && <span style={chip('#ffd166')}>📷 question img</span>}
+                          {q.revealImage && <span style={chip('#00ff88')}>🎉 reveal img</span>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <button style={{ ...s.arrowBtn, opacity: i === 0 ? 0.25 : 1 }} disabled={i === 0} onClick={() => moveQuestion(i, -1)} title="Move up">▲</button>
+                        <button style={{ ...s.arrowBtn, opacity: i === currentGame.questions.length - 1 ? 0.25 : 1 }} disabled={i === currentGame.questions.length - 1} onClick={() => moveQuestion(i, 1)} title="Move down">▼</button>
+                      </div>
+                      <button style={s.editIconBtn} onClick={() => startEditQuestion(q)} title="Edit question">✎</button>
+                      <button style={s.x} onClick={() => removeQuestion(q.id)}>✕</button>
+                    </>
+                  )}
                 </div>
               ))}
               {Object.keys(currentGame.answers || {}).length > 0 && (
                 <div style={{ fontSize: 11, color: '#ffd166', background: '#ffd16611', border: '1px solid #ffd16633', borderRadius: 4, padding: '10px 14px', marginTop: 4 }}>
-                  ⚠ Players have already answered some questions — reordering or removing questions now can mix up their scores. Best to reset the game after big changes.
+                  ⚠ Players have already answered some questions — editing, reordering, or removing questions now can mix up their scores. Best to reset the game after big changes.
                 </div>
               )}
             </div>
@@ -516,6 +593,9 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   // ── MANAGE ────────────────────────────────────────────────────────────────
   if (screen === 'manage' && currentGame) {
     const scores = computeScores(currentGame)
+    const personStats = computePersonStats(currentGame)
+    const maxCorrect = Math.max(1, ...personStats.map(([, st]) => st.correct))
+    const maxFeatured = Math.max(1, ...personStats.map(([, st]) => st.featured))
     const qIdx = currentGame.currentQuestion
     const q = currentGame.questions[qIdx]
     const answeredPlayers = new Set(
@@ -559,6 +639,33 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
             <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('questions'); setScreen('create') }}>✎ Edit Questions</button>
             <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('customize'); setScreen('create') }}>🎨 Customize Theme</button>
           </div>
+
+          {personStats.length > 0 && (
+            <div style={s.section}>
+              <h2 style={s.sectionTitle}>QUESTION BALANCE</h2>
+              <div style={{ fontSize: 11, color: '#555', marginBottom: 16, lineHeight: 1.5 }}>How often each person is a choice vs. the correct answer — keep these close so guesses stay random and no one's an obvious giveaway.</div>
+              {personStats.map(([name, st]) => (
+                <div key={name} style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700 }}>{name}</span>
+                    <span style={{ color: '#555' }}>{st.correct} correct answer{st.correct !== 1 ? 's' : ''} · {st.featured} appearance{st.featured !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ flex: 1, height: 4, background: '#1e1e2e', borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${(st.correct / maxCorrect) * 100}%`, background: '#ffd166', borderRadius: 2 }} />
+                    </div>
+                    <div style={{ flex: 1, height: 4, background: '#1e1e2e', borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${(st.featured / maxFeatured) * 100}%`, background: '#00ff88', borderRadius: 2 }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 16, fontSize: 10, color: '#555', letterSpacing: 1 }}>
+                <span><span style={{ color: '#ffd166' }}>■</span> correct answers</span>
+                <span><span style={{ color: '#00ff88' }}>■</span> total appearances</span>
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
             <div style={{ fontSize: 12, letterSpacing: 2, fontWeight: 700 }}>
               <span style={{ color: currentGame.status === 'active' ? '#00ff88' : currentGame.status === 'finished' ? '#ff6b6b' : '#ffd166' }}>● </span>
@@ -721,6 +828,7 @@ const s = {
   qSub: { fontSize: 11, color: '#555' },
   x: { background: 'none', border: 'none', color: '#333', cursor: 'pointer', fontSize: 16 },
   arrowBtn: { background: '#1a1a2e', border: '1px solid #2e2e3e', color: '#aaa', cursor: 'pointer', fontSize: 10, borderRadius: 3, padding: '4px 8px', lineHeight: 1 },
+  editIconBtn: { background: 'none', border: 'none', color: '#ffd166', cursor: 'pointer', fontSize: 15 },
   prevCard: { background: '#111120', border: '1px solid #1e1e2e', borderRadius: 6, padding: 20, marginBottom: 14 },
   prevPost: { fontSize: 15, color: '#f0f0f0', fontStyle: 'italic', marginBottom: 16, lineHeight: 1.5 },
   shareBox: { background: '#111120', border: '1px solid #ffd16633', borderRadius: 6, padding: '16px 20px', marginBottom: 20 },
