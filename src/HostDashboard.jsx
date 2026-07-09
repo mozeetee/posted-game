@@ -560,6 +560,16 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               <div style={{ fontSize: 11, color: c.textFaint, marginTop: -4, marginBottom: 8 }}>Shown above the answer choices on every question — default is "WHO POSTED THIS?" but make it your own.</div>
               <input style={s.input} placeholder="e.g. WHO SAID THIS? or WHO'S IN THE PHOTO?" value={theme.questionLabel} onChange={e => updateTheme({ questionLabel: e.target.value })} />
             </div>
+            <div style={{ marginBottom: 8 }}>
+              <label style={s.label}>LOBBY WELCOME MESSAGE</label>
+              <div style={{ fontSize: 11, color: c.textFaint, marginTop: -4, marginBottom: 8 }}>Shown to players while they wait in the lobby for you to start. Leave blank to skip it. Line breaks are kept.</div>
+              <textarea
+                style={{ ...s.textarea, minHeight: 160 }}
+                placeholder={"e.g. Welcome to That's So Them 🏕️\nLani's Camp Bach Edition\n\nGet ready to get to know each other a little better..."}
+                value={theme.welcomeMessage}
+                onChange={e => updateTheme({ welcomeMessage: e.target.value })}
+              />
+            </div>
 
             <div style={s.section}>
               <h2 style={s.sectionTitle}>QUICK PRESETS</h2>
