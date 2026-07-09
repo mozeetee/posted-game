@@ -11,7 +11,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   const [selectedAnswer, setSelectedAnswer] = useState(null)
   const [submitted, setSubmitted] = useState(false)
   const [lastQuestionIdx, setLastQuestionIdx] = useState(-1)
-  const [revealed, setRevealed] = useState(false)
+  const [autoRevealed, setAutoRevealed] = useState(false)
   const [revealImageVisible, setRevealImageVisible] = useState(false)
   const [myAnswers, setMyAnswers] = useState({})
   const channelRef = useRef(null)
@@ -19,6 +19,10 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
 
   const theme = getTheme(game)
   const p = buildPlayerStyles(theme)
+  const revealMode = game?.revealMode || 'auto'
+  // In manual mode the correct answer stays hidden until the host broadcasts
+  // a reveal for this question (the same signal that shows the bonus image).
+  const revealed = revealMode === 'manual' ? (submitted && revealImageVisible) : autoRevealed
 
   // Fetch the game up front (before joining) so the join screen is themed too.
   useEffect(() => {
@@ -58,7 +62,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
       if (updated.status === 'active' && updated.currentQuestion !== prev.currentQuestion) {
         setSelectedAnswer(null)
         setSubmitted(false)
-        setRevealed(false)
+        setAutoRevealed(false)
         setRevealImageVisible(false)
         setLastQuestionIdx(updated.currentQuestion)
         setPhase('playing')
@@ -145,7 +149,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     if (isMock) {
       setGame(g => ({ ...g, answers: { ...(g.answers || {}), [key]: answer } }))
       setMyAnswers(prev => ({ ...prev, [game.currentQuestion]: answer }))
-      setTimeout(() => { setRevealed(true); setRevealImageVisible(true) }, 700)
+      if (revealMode === 'auto') setTimeout(() => { setAutoRevealed(true); setRevealImageVisible(true) }, 700)
       return
     }
 
@@ -156,7 +160,12 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     await supabase.from('games').update({ data: updated }).eq('game_id', gameId)
     setGame(updated)
     setMyAnswers(prev => ({ ...prev, [game.currentQuestion]: answer }))
-    setTimeout(() => setRevealed(true), 700)
+    if (revealMode === 'auto') setTimeout(() => setAutoRevealed(true), 700)
+  }
+
+  // Mock-only: lets the host simulate clicking "reveal" on their own dashboard
+  function mockReveal() {
+    setRevealImageVisible(true)
   }
 
   function startMockGame() {
@@ -175,7 +184,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     })
     setSelectedAnswer(null)
     setSubmitted(false)
-    setRevealed(false)
+    setAutoRevealed(false)
     setRevealImageVisible(false)
   }
 
@@ -273,7 +282,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
             {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, marginBottom: 10, marginTop: 4, display: 'block' }} />}
             <div style={p.postText}>{q.post}</div>
           </div>
-          <div style={p.whoLabel}>{theme.questionLabel}</div>
+          <div style={p.whoLabel}>{q.questionLabel?.trim() || theme.questionLabel}</div>
           <div style={p.choiceGrid}>
             {q.choices.map(choice => {
               let bg = theme.cardColor, border = withAlpha(theme.textColor, 0.18), color = theme.textColor
@@ -297,8 +306,13 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
               {isCorrect ? '🎉 Correct! +1 point' : `❌ It was ${q.author}`}
             </div>
           )}
-          {submitted && !revealed && <div style={p.locking}>Locking in your answer…</div>}
+          {submitted && !revealed && (
+            <div style={p.locking}>{revealMode === 'manual' ? "Answer locked in — waiting for the host to reveal…" : 'Locking in your answer…'}</div>
+          )}
           {!submitted && <div style={p.tapHint}>Tap to answer</div>}
+          {isMock && submitted && !revealed && revealMode === 'manual' && (
+            <button style={{ ...p.joinBtn, marginTop: 8 }} onClick={mockReveal}>🎉 Reveal Answer (simulate host)</button>
+          )}
           {submitted && revealImageVisible && q.revealImage && (
             <div style={p.revealBox}>
               <div style={p.revealLabel}>🎉 HOST REVEAL</div>

@@ -30,7 +30,7 @@ async function sha256Hex(text) {
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-const EMPTY_POST = { post: '', author: '', choices: ['', '', '', ''], questionImage: null, revealImage: null }
+const EMPTY_POST = { post: '', author: '', choices: ['', '', '', ''], questionImage: null, revealImage: null, questionLabel: '' }
 
 const SAMPLE_QUESTIONS = [
   { id: 1, post: "Just spent 3 hours reorganizing my spice cabinet alphabetically. No regrets.", author: "Alex", choices: ["Alex", "Jordan", "Sam", "Riley"], questionImage: null, revealImage: null },
@@ -163,7 +163,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
 
   function startNewGame() {
     const id = generateGameId()
-    setCurrentGame({ id, title: '', hostKey: generateHostKey(), theme: { ...DEFAULT_THEME }, questions: SAMPLE_QUESTIONS, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(), answers: {} })
+    setCurrentGame({ id, title: '', hostKey: generateHostKey(), theme: { ...DEFAULT_THEME }, questions: SAMPLE_QUESTIONS, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(), answers: {}, revealMode: 'auto' })
     setGameTitle('')
     setNewPost(EMPTY_POST)
     setEditingId(null)
@@ -180,6 +180,10 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
 
   function updateTheme(patch) {
     setCurrentGame(g => ({ ...g, theme: { ...getTheme(g), ...patch } }))
+  }
+
+  function setRevealMode(mode) {
+    setCurrentGame(g => ({ ...g, revealMode: mode }))
   }
 
   function applyPreset(preset) {
@@ -228,7 +232,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     if (!newPost.post.trim() || !newPost.author.trim()) return
     const filledChoices = newPost.choices.filter(c => c.trim())
     if (filledChoices.length < 2) return
-    const q = { id: Date.now(), post: newPost.post, author: newPost.author, choices: filledChoices, questionImage: newPost.questionImage || null, revealImage: newPost.revealImage || null }
+    const q = { id: Date.now(), post: newPost.post, author: newPost.author, choices: filledChoices, questionImage: newPost.questionImage || null, revealImage: newPost.revealImage || null, questionLabel: newPost.questionLabel?.trim() || null }
     setCurrentGame(g => ({ ...g, questions: [...g.questions, q] }))
     setNewPost(EMPTY_POST)
   }
@@ -249,7 +253,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
 
   function startEditQuestion(q) {
     setEditingId(q.id)
-    setEditDraft({ ...q, choices: [...q.choices] })
+    setEditDraft({ ...q, choices: [...q.choices], questionLabel: q.questionLabel || '' })
   }
 
   function cancelEditQuestion() {
@@ -270,7 +274,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     if (filledChoices.length < 2) return
     setCurrentGame(g => ({
       ...g,
-      questions: g.questions.map(q => q.id === editingId ? { ...editDraft, choices: filledChoices } : q),
+      questions: g.questions.map(q => q.id === editingId ? { ...editDraft, choices: filledChoices, questionLabel: editDraft.questionLabel?.trim() || null } : q),
     }))
     cancelEditQuestion()
   }
@@ -467,6 +471,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                       </div>
                       <label style={s.label}>CORRECT ANSWER</label>
                       <input style={{ ...s.input, marginBottom: 16 }} placeholder="Must exactly match one choice" value={editDraft.author} onChange={e => setEditDraft(d => ({ ...d, author: e.target.value }))} />
+                      <label style={s.label}>QUESTION PROMPT OVERRIDE <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></label>
+                      <input style={{ ...s.input, marginBottom: 16 }} placeholder={`Leave blank to use the game default: "${theme.questionLabel}"`} value={editDraft.questionLabel} onChange={e => setEditDraft(d => ({ ...d, questionLabel: e.target.value }))} />
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                         <label style={{ ...s.label, marginBottom: 0 }}>ANSWER CHOICES</label>
                         <select style={{ ...s.input, width: 70, padding: '6px 8px', fontSize: 12 }} value={editDraft.choices.length} onChange={e => setEditDraft(d => ({ ...d, choices: resizeChoices(d.choices, Number(e.target.value)) }))}>
@@ -492,6 +498,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                         <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
                           {q.questionImage && <span style={chip(c.accent)}>📷 question img</span>}
                           {q.revealImage && <span style={chip(c.success)}>🎉 reveal img</span>}
+                          {q.questionLabel?.trim() && <span style={chip(c.accent)}>💬 "{q.questionLabel}"</span>}
                         </div>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -522,6 +529,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               </div>
               <label style={s.label}>CORRECT ANSWER</label>
               <input style={{ ...s.input, marginBottom: 16 }} placeholder="Must exactly match one choice" value={newPost.author} onChange={e => setNewPost(p => ({ ...p, author: e.target.value }))} />
+              <label style={s.label}>QUESTION PROMPT OVERRIDE <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></label>
+              <input style={{ ...s.input, marginBottom: 16 }} placeholder={`Leave blank to use the game default: "${theme.questionLabel}"`} value={newPost.questionLabel} onChange={e => setNewPost(p => ({ ...p, questionLabel: e.target.value }))} />
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                 <label style={{ ...s.label, marginBottom: 0 }}>ANSWER CHOICES</label>
                 <select style={{ ...s.input, width: 70, padding: '6px 8px', fontSize: 12 }} value={newPost.choices.length} onChange={e => setNewPost(p => ({ ...p, choices: resizeChoices(p.choices, Number(e.target.value)) }))}>
@@ -557,8 +566,16 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
             </div>
             <div style={{ marginBottom: 8 }}>
               <label style={s.label}>QUESTION PROMPT</label>
-              <div style={{ fontSize: 11, color: c.textFaint, marginTop: -4, marginBottom: 8 }}>Shown above the answer choices on every question — default is "WHO POSTED THIS?" but make it your own.</div>
+              <div style={{ fontSize: 11, color: c.textFaint, marginTop: -4, marginBottom: 8 }}>Shown above the answer choices — default for every question. You can also override it per question when adding or editing one, e.g. "WHO DREW THIS?" for a doodle round.</div>
               <input style={s.input} placeholder="e.g. WHO SAID THIS? or WHO'S IN THE PHOTO?" value={theme.questionLabel} onChange={e => updateTheme({ questionLabel: e.target.value })} />
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <label style={s.label}>ANSWER REVEAL</label>
+              <div style={{ fontSize: 11, color: c.textFaint, marginTop: -4, marginBottom: 8 }}>Auto shows each player the correct answer right after they submit. Manual keeps it hidden for everyone until you reveal it from your dashboard — good for building suspense or stopping players peeking at each other's screens.</div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button style={{ ...s.revealModeBtn, ...((currentGame.revealMode || 'auto') === 'auto' ? s.revealModeBtnOn : {}) }} onClick={() => setRevealMode('auto')}>⚡ Auto</button>
+                <button style={{ ...s.revealModeBtn, ...(currentGame.revealMode === 'manual' ? s.revealModeBtnOn : {}) }} onClick={() => setRevealMode('manual')}>🎬 Manual</button>
+              </div>
             </div>
             <div style={{ marginBottom: 8 }}>
               <label style={s.label}>LOBBY WELCOME MESSAGE</label>
@@ -775,24 +792,28 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                 {answeredPlayers.size} / {(currentGame.players || []).length} answered
                 {allAnswered && <span style={{ color: c.success, marginLeft: 8 }}>· Everyone's in! ✓</span>}
               </div>
-              {q.revealImage ? (
+              {(q.revealImage || currentGame.revealMode === 'manual') ? (
                 <div style={s.revealBox}>
-                  <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 8 }}>🎉 REVEAL IMAGE</div>
+                  <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 8 }}>{q.revealImage ? '🎉 REVEAL IMAGE' : '✅ ANSWER REVEAL'}</div>
                   {isRevealed ? (
                     <>
-                      <img src={q.revealImage} alt="reveal" style={{ width: '100%', maxWidth: 400, aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 6, marginBottom: 10, border: `1px solid ${withAlpha(c.success, 0.27)}`, display: 'block' }} />
-                      <div style={{ fontSize: 11, color: c.success, marginBottom: 8 }}>✓ Players can see this image now</div>
-                      <button style={s.hideRevealBtn} onClick={() => toggleReveal(qIdx)}>Hide Reveal Image</button>
+                      {q.revealImage && <img src={q.revealImage} alt="reveal" style={{ width: '100%', maxWidth: 400, aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 6, marginBottom: 10, border: `1px solid ${withAlpha(c.success, 0.27)}`, display: 'block' }} />}
+                      <div style={{ fontSize: 11, color: c.success, marginBottom: 8 }}>✓ {q.revealImage ? 'Players can see this image now' : 'Players can now see the correct answer'}</div>
+                      <button style={s.hideRevealBtn} onClick={() => toggleReveal(qIdx)}>{q.revealImage ? 'Hide Reveal Image' : 'Hide Correct Answer'}</button>
                     </>
                   ) : (
                     <>
-                      <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10 }}>Drop the reveal after players have answered.</div>
-                      <button style={s.showRevealBtn} onClick={() => toggleReveal(qIdx)}>🎉 Show Reveal to Players</button>
+                      <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10 }}>
+                        {q.revealImage
+                          ? (currentGame.revealMode === 'manual' ? 'Reveal shows the correct answer and this image to everyone at once.' : 'Drop the bonus image after players have answered.')
+                          : "Players won't see the correct answer until you reveal it."}
+                      </div>
+                      <button style={s.showRevealBtn} onClick={() => toggleReveal(qIdx)}>{q.revealImage ? '🎉 Show Reveal to Players' : '✅ Reveal Correct Answer'}</button>
                     </>
                   )}
                 </div>
               ) : (
-                <div style={{ fontSize: 11, color: c.textGhost, marginBottom: 12, padding: '10px 14px', background: c.cardAlt, borderRadius: 4, border: `1px dashed ${c.borderSoft}` }}>No reveal image for this question.</div>
+                <div style={{ fontSize: 11, color: c.textGhost, marginBottom: 12, padding: '10px 14px', background: c.cardAlt, borderRadius: 4, border: `1px dashed ${c.borderSoft}` }}>No reveal image for this question — answers reveal automatically to each player.</div>
               )}
               <button style={{ ...s.bigBtn, background: c.accent, color: c.accentText, marginTop: 12 }} onClick={nextQuestion}>
                 {qIdx + 1 >= currentGame.questions.length ? 'Finish Game →' : 'Next Question →'}
@@ -946,6 +967,8 @@ function buildDashTheme(mode) {
     presetGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 },
     presetBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: c.card, border: `1px solid ${c.border}`, borderRadius: 8, padding: '14px 10px', cursor: 'pointer', fontFamily: bodyFont },
     colorSwatch: { width: 40, height: 40, padding: 0, border: `1px solid ${c.border}`, borderRadius: 6, background: 'none', cursor: 'pointer' },
+    revealModeBtn: { flex: 1, padding: '12px 16px', background: c.card, color: c.textMuted, border: `1px solid ${c.border}`, borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: bodyFont },
+    revealModeBtnOn: { background: withAlpha(c.accent, 0.13), color: c.accent, border: `1px solid ${withAlpha(c.accent, 0.4)}` },
   }
   return { s, c }
 }
