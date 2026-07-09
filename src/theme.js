@@ -15,6 +15,7 @@ export function getBrandParts() {
 export const DEFAULT_THEME = {
   tagline: BRAND_TAGLINE,
   questionLabel: 'WHO POSTED THIS?',
+  welcomeMessage: '',
   primaryColor: '#ffd166',
   secondaryColor: '#00ff88',
   backgroundColor: '#0a0a12',

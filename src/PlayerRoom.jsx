@@ -6,7 +6,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   const isMock = !!mockGame
   const [phase, setPhase] = useState('join')
   const [playerName, setPlayerName] = useState(initialName || (isMock ? 'Preview' : ''))
-  const [game, setGame] = useState(() => isMock ? { ...mockGame, currentQuestion: 0, status: 'active', players: [], answers: {} } : null)
+  const [game, setGame] = useState(() => isMock ? { ...mockGame, currentQuestion: 0, status: 'lobby', players: [], answers: {} } : null)
   const [error, setError] = useState('')
   const [selectedAnswer, setSelectedAnswer] = useState(null)
   const [submitted, setSubmitted] = useState(false)
@@ -115,7 +115,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     if (isMock) {
       setGame(g => ({ ...g, players: [{ name: playerName.trim(), joinedAt: Date.now() }] }))
       setLastQuestionIdx(0)
-      setPhase('playing')
+      setPhase('lobby')
       return
     }
 
@@ -157,6 +157,11 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     setGame(updated)
     setMyAnswers(prev => ({ ...prev, [game.currentQuestion]: answer }))
     setTimeout(() => setRevealed(true), 700)
+  }
+
+  function startMockGame() {
+    setGame(g => ({ ...g, status: 'active', currentQuestion: 0 }))
+    setPhase('playing')
   }
 
   function advanceMockQuestion() {
@@ -228,6 +233,9 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
       <div style={p.card}>
         {theme.logoImage && <img src={theme.logoImage} alt="logo" style={p.logoImg} />}
         <div style={p.gameTitle}>{game?.title}</div>
+        {theme.welcomeMessage?.trim() && (
+          <div style={p.welcomeBox}>{theme.welcomeMessage}</div>
+        )}
         <div style={p.waiting}><span style={p.dot}>●</span> Waiting for host to start…</div>
         <div style={{ textAlign: 'center', color: withAlpha(theme.textColor, 0.5), fontSize: 12, marginBottom: 12 }}>{(game?.players || []).length} player{(game?.players || []).length !== 1 ? 's' : ''} joined</div>
         <div style={{ textAlign: 'center', fontSize: 13, color: withAlpha(theme.textColor, 0.65), marginBottom: 20 }}>You're in as <strong style={{ color: theme.primaryColor }}>{playerName}</strong></div>
@@ -238,6 +246,9 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
             </div>
           ))}
         </div>
+        {isMock && (
+          <button style={{ ...p.joinBtn, marginTop: 28 }} onClick={startMockGame}>🚀 Simulate Host Starting →</button>
+        )}
       </div>
     </ThemedPage>
   )
@@ -403,6 +414,7 @@ function buildPlayerStyles(theme) {
     accent: { color: primary },
     sub: { textAlign: 'center', color: withAlpha(text, 0.45), fontSize: 12, letterSpacing: 2, marginBottom: 36 },
     gameTitle: { fontSize: 22, fontWeight: 900, color: primary, textAlign: 'center', marginBottom: 28, fontFamily: headingFont },
+    welcomeBox: { background: card, border: `1px solid ${withAlpha(text, 0.12)}`, borderRadius: 10, padding: '18px 20px', marginBottom: 24, fontSize: 13, color: text, lineHeight: 1.65, whiteSpace: 'pre-line', textAlign: 'left' },
     field: { marginBottom: 20 },
     label: { display: 'block', fontSize: 10, letterSpacing: 2, color: withAlpha(text, 0.5), marginBottom: 8, fontWeight: 700 },
     input: { width: '100%', background: card, border: `1px solid ${withAlpha(text, 0.15)}`, borderRadius: 4, color: text, padding: '14px 16px', fontSize: 15, fontFamily: bodyFont, boxSizing: 'border-box' },
