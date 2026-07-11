@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import { ImageUploadSlot } from './ImageUpload'
 import { compressImage, readFileAsDataUrl } from './ImageUpload'
@@ -61,6 +61,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [mockReturnScreen, setMockReturnScreen] = useState('manage')
   const [dashMode, setDashMode] = useState(() => localStorage.getItem(DASH_MODE_KEY) || 'dark')
   const { s, c } = buildDashTheme(dashMode)
+  const pendingSaveRef = useRef(false)
 
   function toggleDashMode() {
     setDashMode(m => {
@@ -148,12 +149,51 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
         .upsert({ game_id: game.id, data: game, created_at: new Date().toISOString() }, { onConflict: 'game_id' })
       if (error) throw error
       await loadGames()
+      return true
     } catch (e) {
       setSaveError('Save failed: ' + (e.message || 'unknown error'))
+      return false
     } finally {
       setSaving(false)
     }
   }
+
+  // A game is only worth persisting once it has a title and at least one question.
+  function isSaveable(game, title) {
+    return !!(game && title.trim() && game.questions.length > 0)
+  }
+
+  // Immediately save any pending edit, bypassing the autosave debounce — used
+  // whenever the host navigates away from the editor, so nothing is lost.
+  async function flushSave() {
+    if (!pendingSaveRef.current || !isSaveable(currentGame, gameTitle)) return
+    pendingSaveRef.current = false
+    await saveGame({ ...currentGame, title: gameTitle })
+  }
+
+  // Debounced autosave: fires ~900ms after the host stops editing.
+  useEffect(() => {
+    if (screen !== 'create' || !currentGame) return
+    pendingSaveRef.current = true
+    if (!isSaveable(currentGame, gameTitle)) return
+    const timer = setTimeout(async () => {
+      const ok = await saveGame({ ...currentGame, title: gameTitle })
+      if (ok) pendingSaveRef.current = false
+    }, 900)
+    return () => clearTimeout(timer)
+  }, [currentGame, gameTitle, screen])
+
+  // Warn before closing/refreshing the tab if there's an edit the debounce hasn't saved yet.
+  useEffect(() => {
+    function handleBeforeUnload(e) {
+      if (screen === 'create' && pendingSaveRef.current && isSaveable(currentGame, gameTitle)) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [screen, currentGame, gameTitle])
 
   async function deleteGame(gameId) {
     await supabase.from('games').delete().eq('game_id', gameId)
@@ -172,8 +212,9 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     setActiveTab('questions')
   }
 
-  function startMockPreview(fromScreen) {
+  async function startMockPreview(fromScreen) {
     if (!currentGame || currentGame.questions.length === 0) return
+    await flushSave()
     setMockReturnScreen(fromScreen)
     setScreen('mockplay')
   }
@@ -190,12 +231,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     updateTheme(preset.theme)
   }
 
-  async function publishGame() {
-    if (!gameTitle.trim() || currentGame.questions.length === 0) return
-    // keep the existing status when editing a published game; new games are already 'lobby'
-    const game = { ...currentGame, title: gameTitle }
-    await saveGame(game)
-    if (!saveError) { setCurrentGame(game); setScreen('manage') }
+  // Games autosave as you edit; this just flushes any pending save and moves on.
+  async function goToManage() {
+    await flushSave()
+    setCurrentGame(g => ({ ...g, title: gameTitle }))
+    setScreen('manage')
   }
 
   async function startGame() {
@@ -435,12 +475,22 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   if (screen === 'create') {
     const theme = getTheme(currentGame)
     const isPublished = isHostMode || games.some(g => g.id === currentGame.id)
+    const autosaveLabel = saving
+      ? '● Saving…'
+      : saveError
+      ? `⚠ ${saveError}`
+      : isPublished
+      ? '✓ Saved'
+      : (gameTitle.trim() && currentGame.questions.length > 0 ? '● Unsaved' : '')
     return (
     <div style={s.page}>
       <div style={s.container}>
         <div style={s.topBar}>
-          <button style={s.back} onClick={() => setScreen(isPublished ? 'manage' : 'home')}>← {isPublished ? 'Back to Manage' : 'Back'}</button>
-          <div style={s.step}>{isPublished ? 'EDIT GAME' : 'GAME SETUP'} · {currentGame.id}</div>
+          <button style={s.back} onClick={async () => { await flushSave(); setScreen(isPublished ? 'manage' : 'home') }}>← {isPublished ? 'Back to Manage' : 'Back'}</button>
+          <div style={{ textAlign: 'center' }}>
+            <div style={s.step}>{isPublished ? 'EDIT GAME' : 'GAME SETUP'} · {currentGame.id}</div>
+            {autosaveLabel && <div style={{ fontSize: 10, letterSpacing: 1, marginTop: 3, color: saveError ? c.danger : c.textFaint }}>{autosaveLabel}</div>}
+          </div>
           <button style={s.modeToggle} onClick={toggleDashMode} title="Toggle light/dark mode">{dashMode === 'dark' ? '☀️' : '🌙'}</button>
         </div>
         <div style={s.tabs}>
@@ -545,12 +595,13 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               <button style={s.addBtn} onClick={addQuestion}>Add Question →</button>
             </div>
 
-            {saveError && <div style={{ color: '#ff6b6b', fontSize: 12, marginTop: 12, padding: '10px 14px', background: '#ff6b6b11', borderRadius: 4 }}>{saveError}</div>}
+            {saveError && <div style={{ color: c.danger, fontSize: 12, marginTop: 12, padding: '10px 14px', background: withAlpha(c.danger, 0.07), borderRadius: 4 }}>{saveError}</div>}
+            <div style={{ fontSize: 11, color: c.textFaint, textAlign: 'center', marginTop: 20, marginBottom: 8 }}>Your changes save automatically as you go.</div>
             <button
-              style={{ ...s.bigBtn, marginTop: 24, opacity: (!gameTitle.trim() || currentGame.questions.length === 0 || saving) ? 0.4 : 1 }}
-              onClick={publishGame}
-              disabled={!gameTitle.trim() || currentGame.questions.length === 0 || saving}
-            >{saving ? 'Saving…' : isPublished ? 'Save Changes →' : 'Publish & Get Share Link →'}</button>
+              style={{ ...s.bigBtn, opacity: (!gameTitle.trim() || currentGame.questions.length === 0) ? 0.4 : 1 }}
+              onClick={goToManage}
+              disabled={!gameTitle.trim() || currentGame.questions.length === 0}
+            >{isPublished ? 'Go to Share & Manage →' : 'Save & Get Share Link →'}</button>
           </>
         )}
 
