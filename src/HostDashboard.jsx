@@ -879,10 +879,34 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                 </div>
               )}
               <div style={{ fontSize: 15, fontStyle: 'italic', color: c.text, lineHeight: 1.6, marginBottom: 10 }}>"{q.post}"</div>
-              <div style={{ fontSize: 13, color: c.textFaint, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: c.textFaint, marginBottom: 10 }}>
                 {answeredPlayers.size} / {livePlayers.length} answered
                 {allAnswered && <span style={{ color: c.success, marginLeft: 8 }}>· Everyone's in! ✓</span>}
               </div>
+              {livePlayers.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                    {livePlayers.filter(pl => answeredPlayers.has(pl.name)).map(pl => {
+                      const correct = liveAnswers[`${pl.name}:::${qIdx}`] === q.author
+                      return (
+                        <span key={pl.name} style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, border: `1px solid ${correct ? withAlpha(c.success, 0.53) : withAlpha(c.danger, 0.53)}`, background: correct ? withAlpha(c.success, 0.08) : withAlpha(c.danger, 0.08), color: c.textDim }}>
+                          {correct ? '✅' : '❌'} {pl.name}
+                        </span>
+                      )
+                    })}
+                    {livePlayers.filter(pl => !answeredPlayers.has(pl.name)).map(pl => (
+                      <span key={pl.name} style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, border: `1px dashed ${c.border}`, color: c.textFaint }}>
+                        ⏳ {pl.name}
+                      </span>
+                    ))}
+                  </div>
+                  {answeredPlayers.size > 0 && !allAnswered && (
+                    <div style={{ fontSize: 11, color: c.textFaint }}>
+                      Waiting on: {livePlayers.filter(pl => !answeredPlayers.has(pl.name)).map(pl => pl.name).join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
               {(q.revealImage || currentGame.revealMode === 'manual') ? (
                 <div style={s.revealBox}>
                   <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 8 }}>{q.revealImage ? '🎉 REVEAL IMAGE' : '✅ ANSWER REVEAL'}</div>
