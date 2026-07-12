@@ -12,6 +12,9 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   const [submitted, setSubmitted] = useState(false)
   const [autoRevealed, setAutoRevealed] = useState(false)
   const [revealImageVisible, setRevealImageVisible] = useState(false)
+  // Which question the "round results" interstitial is showing (set when the
+  // host advances while this player is mid-game).
+  const [lastRoundIdx, setLastRoundIdx] = useState(null)
   // Answers and joined players live in their own small tables (one row each)
   // so nothing rewrites the multi-MB game blob during play. These mirror them.
   const [tableAnswers, setTableAnswers] = useState({})
@@ -58,13 +61,24 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     // against the newest state, not a stale render.
     gameRef.current = { ...prev, status, currentQuestion }
     if (status === 'active') {
-      if (prev.status !== 'active' || currentQuestion !== prev.currentQuestion) {
+      if (prev.status !== 'active') {
+        // Game just started — straight into the first question
         setSelectedAnswer(null)
         setSubmitted(false)
         setAutoRevealed(false)
         setRevealImageVisible(false)
+        setPhase('playing')
+      } else if (currentQuestion !== prev.currentQuestion) {
+        // Host advanced. Don't yank the player to the next question — show a
+        // scoreboard interstitial first so nobody misses the reveal/results,
+        // and let them tap Ready to continue at their own pace.
+        setSelectedAnswer(null)
+        setSubmitted(false)
+        setAutoRevealed(false)
+        setRevealImageVisible(false)
+        setLastRoundIdx(prev.currentQuestion)
+        setPhase('between')
       }
-      setPhase('playing')
     } else if (status === 'lobby') {
       setPhase('lobby')
     } else if (status === 'finished') {
@@ -220,18 +234,19 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   }
 
   function advanceMockQuestion() {
-    setGame(g => {
-      const next = g.currentQuestion + 1
-      if (next >= g.questions.length) {
-        setPhase('finished')
-        return { ...g, status: 'finished' }
-      }
-      return { ...g, currentQuestion: next }
-    })
+    const next = game.currentQuestion + 1
     setSelectedAnswer(null)
     setSubmitted(false)
     setAutoRevealed(false)
     setRevealImageVisible(false)
+    if (next >= game.questions.length) {
+      setGame(g => ({ ...g, status: 'finished' }))
+      setPhase('finished')
+      return
+    }
+    setLastRoundIdx(game.currentQuestion)
+    setGame(g => ({ ...g, currentQuestion: next }))
+    setPhase('between')
   }
 
   function wrapMock(node) {
@@ -371,14 +386,20 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
           )}
           {submitted && revealed && playersArr.length > 0 && (
             <div style={p.lbBox}>
-              <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>SCOREBOARD SO FAR</div>
-              {computeAllScores(game).map(([name, score], i) => (
-                <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', borderRadius: 4, background: name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
-                  <span style={{ width: 24, fontSize: 14, textAlign: 'center' }}>{['🏆', '🥈', '🥉'][i] || `#${i + 1}`}</span>
-                  <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: name === playerName ? theme.primaryColor : theme.textColor }}>{name}</span>
-                  <span style={{ fontSize: 13, color: theme.primaryColor }}>{score} pt{score !== 1 ? 's' : ''}</span>
-                </div>
-              ))}
+              <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>THIS ROUND</div>
+              {playersArr.map(pl => {
+                const ans = answersMap[`${pl.name}:::${game.currentQuestion}`]
+                const state = ans == null ? 'waiting' : ans === q.author ? 'right' : 'wrong'
+                return (
+                  <div key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', borderRadius: 4, background: pl.name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
+                    <span style={{ width: 24, fontSize: 14, textAlign: 'center' }}>{state === 'right' ? '✅' : state === 'wrong' ? '❌' : '⏳'}</span>
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: pl.name === playerName ? theme.primaryColor : theme.textColor }}>{pl.name}</span>
+                    <span style={{ fontSize: 12, color: state === 'waiting' ? withAlpha(theme.textColor, 0.4) : state === 'right' ? theme.secondaryColor : '#ff6b6b' }}>
+                      {state === 'waiting' ? 'still guessing…' : state === 'right' ? 'got it!' : `guessed ${ans}`}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           )}
           {isMock && submitted && revealed && (
@@ -386,6 +407,52 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
               {game.currentQuestion + 1 >= game.questions.length ? 'Finish Preview →' : 'Next Question →'}
             </button>
           )}
+        </div>
+      </ThemedPage>
+    )
+  }
+
+  // ── BETWEEN ROUNDS (scoreboard interstitial) ──────────────────────────────
+  // Shown when the host advances: round results + running totals, and the
+  // player taps Ready when they've seen it — so nobody misses the reveal.
+  if (phase === 'between' && game) {
+    const li = lastRoundIdx
+    const lq = li != null ? game.questions[li] : null
+    const totals = computeAllScores(game)
+    return wrapMock(
+      <ThemedPage theme={theme}>
+        <div style={p.card}>
+          {theme.logoImage && <img src={theme.logoImage} alt="logo" style={p.logoImg} />}
+          {lq && (
+            <div style={p.lbBox}>
+              <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 6 }}>ROUND {li + 1} RESULTS</div>
+              <div style={{ fontSize: 12, color: withAlpha(theme.textColor, 0.65), marginBottom: 14 }}>The answer was <strong style={{ color: theme.secondaryColor }}>{lq.author}</strong></div>
+              {playersArr.map(pl => {
+                const ans = answersMap[`${pl.name}:::${li}`]
+                const state = ans == null ? 'none' : ans === lq.author ? 'right' : 'wrong'
+                return (
+                  <div key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', borderRadius: 4, background: pl.name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
+                    <span style={{ width: 24, fontSize: 14, textAlign: 'center' }}>{state === 'right' ? '✅' : state === 'wrong' ? '❌' : '—'}</span>
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: pl.name === playerName ? theme.primaryColor : theme.textColor }}>{pl.name}</span>
+                    <span style={{ fontSize: 12, color: state === 'none' ? withAlpha(theme.textColor, 0.4) : state === 'right' ? theme.secondaryColor : '#ff6b6b' }}>
+                      {state === 'none' ? 'no answer' : state === 'right' ? '+1 point' : `guessed ${ans}`}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div style={p.lbBox}>
+            <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>SCOREBOARD</div>
+            {totals.map(([name, score], i) => (
+              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', borderRadius: 4, background: name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
+                <span style={{ width: 24, fontSize: 14, textAlign: 'center' }}>{['🏆', '🥈', '🥉'][i] || `#${i + 1}`}</span>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: name === playerName ? theme.primaryColor : theme.textColor }}>{name}</span>
+                <span style={{ fontSize: 13, color: theme.primaryColor }}>{score} pt{score !== 1 ? 's' : ''}</span>
+              </div>
+            ))}
+          </div>
+          <button style={p.joinBtn} onClick={() => setPhase('playing')}>I'm Ready — Next Question →</button>
         </div>
       </ThemedPage>
     )
