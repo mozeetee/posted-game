@@ -60,6 +60,10 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [editDraft, setEditDraft] = useState(null)
   const [mockReturnScreen, setMockReturnScreen] = useState('manage')
   const [dashMode, setDashMode] = useState(() => localStorage.getItem(DASH_MODE_KEY) || 'dark')
+  // Live gameplay state from the small per-row tables (answers / game_players),
+  // so the manage screen never re-downloads the multi-MB game blob while running.
+  const [liveAnswers, setLiveAnswers] = useState({})
+  const [livePlayers, setLivePlayers] = useState([])
   const { s, c } = buildDashTheme(dashMode)
   const pendingSaveRef = useRef(false)
 
@@ -105,39 +109,57 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     ensureGoogleFont(currentGame.theme.bodyFont)
   }, [currentGame?.theme?.headingFont, currentGame?.theme?.bodyFont])
 
-  useEffect(() => {
-    if (screen !== 'manage' || !currentGame) return
-    const channel = supabase
-      .channel(`game-host-${currentGame.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'games', filter: `game_id=eq.${currentGame.id}` },
-        payload => {
-          if (payload.new) setCurrentGame(payload.new.data)
-        }
-      )
-      .subscribe()
-    return () => supabase.removeChannel(channel)
-  }, [screen, currentGame?.id])
-
-  // Poll as a fallback in case Supabase Realtime isn't delivering postgres_changes
-  // events (e.g. replication isn't enabled for these tables in this project) — this
-  // is how the host sees player answers land in the live scoreboard.
+  // Live sync while managing a game: answers and joined players come from
+  // their own small tables (bytes, not megabytes), plus a tiny status check
+  // in case another host tab (admin vs. customer) advanced the game.
   useEffect(() => {
     if (screen !== 'manage' || !currentGame) return
     const gameId = currentGame.id
-    const poll = setInterval(async () => {
-      const { data } = await supabase.from('games').select('data').eq('game_id', gameId).single()
-      if (data?.data) setCurrentGame(data.data)
-    }, 2500)
-    return () => clearInterval(poll)
+    let stopped = false
+    async function tick() {
+      const [ans, pl, st] = await Promise.all([
+        supabase.from('answers').select('player_name,question_idx,answer').eq('game_id', gameId),
+        supabase.from('game_players').select('player_name').eq('game_id', gameId),
+        supabase.from('games').select('status:data->>status,current_question:data->currentQuestion').eq('game_id', gameId).single(),
+      ])
+      if (stopped) return
+      if (ans.data) setLiveAnswers(Object.fromEntries(ans.data.map(r => [`${r.player_name}:::${r.question_idx}`, r.answer])))
+      if (pl.data) setLivePlayers(pl.data.map(r => ({ name: r.player_name })))
+      if (st.data) setCurrentGame(g => {
+        if (!g || (g.status === st.data.status && g.currentQuestion === st.data.current_question)) return g
+        return { ...g, status: st.data.status, currentQuestion: st.data.current_question }
+      })
+    }
+    tick()
+    const poll = setInterval(tick, 2500)
+    return () => { stopped = true; clearInterval(poll) }
   }, [screen, currentGame?.id])
 
+  // Home list needs titles and counts, not every game's full blob with all
+  // its images — the list_games() function returns just those few columns.
   async function loadGames() {
     if (isHostMode) return
-    const { data, error } = await supabase
-      .from('games')
-      .select('game_id, data')
-      .order('created_at', { ascending: false })
-    if (!error && data) setGames(data.map(r => r.data))
+    const { data, error } = await supabase.rpc('list_games')
+    if (!error && data) {
+      setGames(data.map(r => ({ id: r.game_id, title: r.title, status: r.status || 'lobby', questionCount: r.question_count, playerCount: r.player_count })))
+      return
+    }
+    // Fallback for databases that haven't run the multiplayer migration yet
+    const res = await supabase.from('games').select('game_id, data').order('created_at', { ascending: false })
+    if (!res.error && res.data) {
+      setGames(res.data.map(r => ({ id: r.data.id, title: r.data.title, status: r.data.status || 'lobby', questionCount: (r.data.questions || []).length, playerCount: (r.data.players || []).length })))
+    }
+  }
+
+  // Fetch one game's full blob (questions, images, theme) on demand.
+  async function openManage(gameId) {
+    const { data } = await supabase.from('games').select('data').eq('game_id', gameId).single()
+    if (!data?.data) return
+    setCurrentGame(data.data)
+    setGameTitle(data.data.title || '')
+    setLiveAnswers({})
+    setLivePlayers([])
+    setScreen('manage')
   }
 
   async function saveGame(game) {
@@ -196,7 +218,12 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   }, [screen, currentGame, gameTitle])
 
   async function deleteGame(gameId) {
-    await supabase.from('games').delete().eq('game_id', gameId)
+    await Promise.all([
+      supabase.from('games').delete().eq('game_id', gameId),
+      supabase.from('reveals').delete().eq('game_id', gameId),
+      supabase.from('answers').delete().eq('game_id', gameId),
+      supabase.from('game_players').delete().eq('game_id', gameId),
+    ])
     await loadGames()
     if (currentGame?.id === gameId) { setCurrentGame(null); setScreen('home') }
   }
@@ -238,9 +265,19 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     setScreen('manage')
   }
 
+  // Game-flow changes are one tiny atomic database call (advance_game) instead
+  // of re-uploading the whole multi-MB blob — instant, and immune to being
+  // clobbered by player answer writes.
+  async function advanceGameState(status, currentQuestion) {
+    setSaveError('')
+    const { error } = await supabase.rpc('advance_game', { gid: currentGame.id, new_status: status, new_q: currentQuestion })
+    if (error) { setSaveError('Update failed: ' + error.message); return false }
+    setCurrentGame(g => ({ ...g, status, currentQuestion }))
+    return true
+  }
+
   async function startGame() {
-    const game = { ...currentGame, status: 'active', currentQuestion: 0 }
-    await saveGame(game); setCurrentGame(game)
+    await advanceGameState('active', 0)
   }
 
   async function nextQuestion() {
@@ -248,14 +285,17 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     setRevealedMap(m => ({ ...m, [next]: false }))
     // clear reveal flag for next question
     await supabase.from('reveals').delete().eq('game_id', currentGame.id).eq('question_idx', next)
-    const game = { ...currentGame, currentQuestion: next, status: next >= currentGame.questions.length ? 'finished' : 'active' }
-    await saveGame(game); setCurrentGame(game)
+    await advanceGameState(next >= currentGame.questions.length ? 'finished' : 'active', next)
   }
 
   async function resetGame() {
-    await supabase.from('reveals').delete().eq('game_id', currentGame.id)
-    const game = { ...currentGame, status: 'lobby', currentQuestion: 0, answers: {}, players: [] }
-    await saveGame(game); setCurrentGame(game); setRevealedMap({})
+    await Promise.all([
+      supabase.from('reveals').delete().eq('game_id', currentGame.id),
+      supabase.from('answers').delete().eq('game_id', currentGame.id),
+      supabase.from('game_players').delete().eq('game_id', currentGame.id),
+    ])
+    const ok = await advanceGameState('lobby', 0)
+    if (ok) { setRevealedMap({}); setLiveAnswers({}); setLivePlayers([]) }
   }
 
   async function toggleReveal(qIdx) {
@@ -358,8 +398,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
 
   function computeScores(game) {
     const scores = {}
-    ;(game.players || []).forEach(p => (scores[p.name] = 0))
-    Object.entries(game.answers || {}).forEach(([key, answer]) => {
+    livePlayers.forEach(p => (scores[p.name] = 0))
+    Object.entries(liveAnswers).forEach(([key, answer]) => {
       const [pName, qIdxStr] = key.split(':::')
       const q = game.questions[parseInt(qIdxStr)]
       if (q && answer === q.author) scores[pName] = (scores[pName] || 0) + 1
@@ -448,11 +488,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                       <div style={s.gameCardTitle}>{g.title || 'Untitled'}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
                         <span style={{ ...s.badge, background: statusColor, color: contrastColor(statusColor) }}>{g.status.toUpperCase()}</span>
-                        <span style={s.meta}>{g.questions.length} Qs · {(g.players || []).length} players</span>
+                        <span style={s.meta}>{g.questionCount} Qs · {g.playerCount} players</span>
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 12 }}>
-                      <button style={s.ghost} onClick={() => { setCurrentGame(g); setGameTitle(g.title); setScreen('manage') }}>Manage</button>
+                      <button style={s.ghost} onClick={() => openManage(g.id)}>Manage</button>
                       <button style={{ ...s.ghost, color: c.danger }} onClick={() => deleteGame(g.id)}>Delete</button>
                     </div>
                   </div>
@@ -561,7 +601,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                   )}
                 </div>
               ))}
-              {Object.keys(currentGame.answers || {}).length > 0 && (
+              {Object.keys(liveAnswers).length > 0 && (
                 <div style={{ fontSize: 11, color: c.accent, background: withAlpha(c.accent, 0.07), border: `1px solid ${withAlpha(c.accent, 0.2)}`, borderRadius: 4, padding: '10px 14px', marginTop: 4 }}>
                   ⚠ Players have already answered some questions — editing, reordering, or removing questions now can mix up their scores. Best to reset the game after big changes.
                 </div>
@@ -741,10 +781,10 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     const qIdx = currentGame.currentQuestion
     const q = currentGame.questions[qIdx]
     const answeredPlayers = new Set(
-      Object.keys(currentGame.answers || {}).filter(k => k.endsWith(`:::${qIdx}`)).map(k => k.split(':::')[0])
+      Object.keys(liveAnswers).filter(k => k.endsWith(`:::${qIdx}`)).map(k => k.split(':::')[0])
     )
     const isRevealed = !!revealedMap[qIdx]
-    const allAnswered = (currentGame.players || []).length > 0 && answeredPlayers.size >= (currentGame.players || []).length
+    const allAnswered = livePlayers.length > 0 && answeredPlayers.size >= livePlayers.length
 
     return (
       <div style={s.page}>
@@ -815,11 +855,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               <span style={{ color: currentGame.status === 'active' ? c.success : currentGame.status === 'finished' ? c.danger : c.accent }}>● </span>
               {currentGame.status.toUpperCase()}
             </div>
-            <div style={s.meta}>{(currentGame.players || []).length} players joined</div>
+            <div style={s.meta}>{livePlayers.length} players joined</div>
           </div>
-          {(currentGame.players || []).length > 0 && (
+          {livePlayers.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-              {(currentGame.players || []).map(p => (
+              {livePlayers.map(p => (
                 <div key={p.name} style={{ padding: '6px 14px', border: `1px solid ${answeredPlayers.has(p.name) ? c.success : c.border}`, borderRadius: 20, fontSize: 12, color: c.textDim, transition: 'border-color 0.3s' }}>
                   {p.name}{answeredPlayers.has(p.name) && <span style={{ color: c.success }}> ✓</span>}
                 </div>
@@ -840,7 +880,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               )}
               <div style={{ fontSize: 15, fontStyle: 'italic', color: c.text, lineHeight: 1.6, marginBottom: 10 }}>"{q.post}"</div>
               <div style={{ fontSize: 13, color: c.textFaint, marginBottom: 16 }}>
-                {answeredPlayers.size} / {(currentGame.players || []).length} answered
+                {answeredPlayers.size} / {livePlayers.length} answered
                 {allAnswered && <span style={{ color: c.success, marginLeft: 8 }}>· Everyone's in! ✓</span>}
               </div>
               {(q.revealImage || currentGame.revealMode === 'manual') ? (

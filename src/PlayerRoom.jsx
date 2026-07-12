@@ -10,10 +10,12 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   const [error, setError] = useState('')
   const [selectedAnswer, setSelectedAnswer] = useState(null)
   const [submitted, setSubmitted] = useState(false)
-  const [lastQuestionIdx, setLastQuestionIdx] = useState(-1)
   const [autoRevealed, setAutoRevealed] = useState(false)
   const [revealImageVisible, setRevealImageVisible] = useState(false)
-  const [myAnswers, setMyAnswers] = useState({})
+  // Answers and joined players live in their own small tables (one row each)
+  // so nothing rewrites the multi-MB game blob during play. These mirror them.
+  const [tableAnswers, setTableAnswers] = useState({})
+  const [playersList, setPlayersList] = useState([])
   const channelRef = useRef(null)
   const gameRef = useRef(null)
 
@@ -23,6 +25,9 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   // In manual mode the correct answer stays hidden until the host broadcasts
   // a reveal for this question (the same signal that shows the bonus image).
   const revealed = revealMode === 'manual' ? (submitted && revealImageVisible) : autoRevealed
+  // Mock preview keeps everything in-memory on the game object; real games use the tables.
+  const answersMap = isMock ? (game?.answers || {}) : tableAnswers
+  const playersArr = isMock ? (game?.players || []) : playersList
 
   // Fetch the game up front (before joining) so the join screen is themed too.
   useEffect(() => {
@@ -41,40 +46,47 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     ensureGoogleFont(theme.bodyFont)
   }, [theme.headingFont, theme.bodyFont])
 
-  // Subscribe to real-time game updates once joined
+  // Applies a status/question change from the server. This is the ONLY place
+  // phase transitions happen after joining, so lobby→active works even when
+  // the question index doesn't change (the old code missed that case and
+  // left early joiners stuck in the lobby forever).
+  function applyGameState(status, currentQuestion) {
+    const prev = gameRef.current
+    if (!prev) return
+    if (status === prev.status && currentQuestion === prev.currentQuestion) return
+    // Keep the ref in sync immediately so back-to-back poll ticks compare
+    // against the newest state, not a stale render.
+    gameRef.current = { ...prev, status, currentQuestion }
+    if (status === 'active') {
+      if (prev.status !== 'active' || currentQuestion !== prev.currentQuestion) {
+        setSelectedAnswer(null)
+        setSubmitted(false)
+        setAutoRevealed(false)
+        setRevealImageVisible(false)
+      }
+      setPhase('playing')
+    } else if (status === 'lobby') {
+      setPhase('lobby')
+    } else if (status === 'finished') {
+      setPhase('finished')
+    }
+    setGame(g => (g ? { ...g, status, currentQuestion } : g))
+  }
+
+  // Realtime nudge for host reveals (if replication is enabled); polling below
+  // covers everything regardless.
   function subscribeToGame(gid) {
     if (channelRef.current) supabase.removeChannel(channelRef.current)
-
     channelRef.current = supabase
       .channel(`game-player-${gid}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'games', filter: `game_id=eq.${gid}` },
-        payload => { if (payload.new?.data) handleGameUpdate(payload.new.data) }
-      )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reveals', filter: `game_id=eq.${gid}` },
         () => checkReveal(gid)
       )
       .subscribe()
   }
 
-  function handleGameUpdate(updated) {
-    setGame(prev => {
-      if (!prev) return updated
-      if (updated.status === 'active' && updated.currentQuestion !== prev.currentQuestion) {
-        setSelectedAnswer(null)
-        setSubmitted(false)
-        setAutoRevealed(false)
-        setRevealImageVisible(false)
-        setLastQuestionIdx(updated.currentQuestion)
-        setPhase('playing')
-      }
-      if (updated.status === 'lobby') setPhase('lobby')
-      if (updated.status === 'finished') setPhase('finished')
-      return updated
-    })
-  }
-
   async function checkReveal(gid) {
-    const g = game
+    const g = gameRef.current
     if (!g) return
     const { data } = await supabase
       .from('reveals')
@@ -82,6 +94,15 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
       .eq('game_id', gid)
       .eq('question_idx', g.currentQuestion)
     setRevealImageVisible(!!(data && data.length > 0))
+  }
+
+  async function refreshTables() {
+    const [ans, pl] = await Promise.all([
+      supabase.from('answers').select('player_name,question_idx,answer').eq('game_id', gameId),
+      supabase.from('game_players').select('player_name').eq('game_id', gameId),
+    ])
+    if (ans.data) setTableAnswers(Object.fromEntries(ans.data.map(r => [`${r.player_name}:::${r.question_idx}`, r.answer])))
+    if (pl.data) setPlayersList(pl.data.map(r => ({ name: r.player_name })))
   }
 
   useEffect(() => {
@@ -96,21 +117,26 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
 
   useEffect(() => { gameRef.current = game }, [game])
 
-  // Poll as a fallback in case Supabase Realtime isn't delivering postgres_changes
-  // events (e.g. replication isn't enabled for these tables in this project).
+  // Main sync loop. The full game blob (with all its images) is downloaded
+  // ONCE at join — after that we poll only tiny things: the game's status and
+  // question number (a few bytes), reveal flags, and the answers/players rows.
   useEffect(() => {
     if (isMock || phase === 'join') return
     const poll = setInterval(async () => {
-      const { data } = await supabase.from('games').select('data').eq('game_id', gameId).single()
-      if (data?.data) handleGameUpdate(data.data)
-      const g = gameRef.current
-      if (g) {
-        const { data: rv } = await supabase.from('reveals').select('question_idx').eq('game_id', gameId).eq('question_idx', g.currentQuestion)
-        setRevealImageVisible(!!(rv && rv.length > 0))
-      }
+      const [st, rv] = await Promise.all([
+        supabase.from('games').select('status:data->>status,current_question:data->currentQuestion').eq('game_id', gameId).single(),
+        gameRef.current
+          ? supabase.from('reveals').select('question_idx').eq('game_id', gameId).eq('question_idx', gameRef.current.currentQuestion)
+          : Promise.resolve({ data: null }),
+      ])
+      if (st.data) applyGameState(st.data.status, st.data.current_question)
+      if (rv.data) setRevealImageVisible(rv.data.length > 0)
+      // Players/answers only matter in the lobby (who's here) and after a
+      // reveal (scoreboard) — but they're tiny rows, so just keep them fresh.
+      refreshTables()
     }, 2500)
     return () => clearInterval(poll)
-  }, [phase, gameId])
+  }, [phase, gameId, isMock])
 
   async function joinGame() {
     setError('')
@@ -118,25 +144,39 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
 
     if (isMock) {
       setGame(g => ({ ...g, players: [{ name: playerName.trim(), joinedAt: Date.now() }] }))
-      setLastQuestionIdx(0)
       setPhase('lobby')
       return
     }
 
     const { data, error: fetchErr } = await supabase.from('games').select('data').eq('game_id', gameId).single()
     if (fetchErr || !data) { setError('Game not found. Check your link.'); return }
-
     const g = data.data
-    const already = (g.players || []).find(p => p.name.toLowerCase() === playerName.trim().toLowerCase())
-    if (!already) {
-      const updated = { ...g, players: [...(g.players || []), { name: playerName.trim(), joinedAt: Date.now() }] }
-      await supabase.from('games').update({ data: updated }).eq('game_id', gameId)
-      setGame(updated)
-    } else {
-      setGame(g)
+
+    // Reuse the existing name row if they rejoin with different capitalization
+    const { data: existing } = await supabase.from('game_players').select('player_name').eq('game_id', gameId)
+    const match = (existing || []).find(r => r.player_name.toLowerCase() === playerName.trim().toLowerCase())
+    const name = match ? match.player_name : playerName.trim()
+    if (!match) {
+      const { error: joinErr } = await supabase.from('game_players').insert({ game_id: gameId, player_name: name })
+      if (joinErr && joinErr.code !== '23505') { setError('Could not join: ' + joinErr.message); return }
     }
-    setLastQuestionIdx(g.currentQuestion)
+    setPlayerName(name)
+
+    setGame(g)
+    gameRef.current = g
+    await refreshTables()
+
+    // If they answered the current question before (e.g. phone reload), restore it
+    const { data: mine } = await supabase.from('answers').select('answer')
+      .eq('game_id', gameId).eq('player_name', name).eq('question_idx', g.currentQuestion)
+    if (mine && mine.length > 0) {
+      setSelectedAnswer(mine[0].answer)
+      setSubmitted(true)
+      if ((g.revealMode || 'auto') === 'auto') setAutoRevealed(true)
+    }
+
     subscribeToGame(gameId)
+    checkReveal(gameId)
     setPhase(g.status === 'active' ? 'playing' : g.status === 'finished' ? 'finished' : 'lobby')
   }
 
@@ -148,18 +188,24 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
 
     if (isMock) {
       setGame(g => ({ ...g, answers: { ...(g.answers || {}), [key]: answer } }))
-      setMyAnswers(prev => ({ ...prev, [game.currentQuestion]: answer }))
       if (revealMode === 'auto') setTimeout(() => { setAutoRevealed(true); setRevealImageVisible(true) }, 700)
       return
     }
 
-    const { data } = await supabase.from('games').select('data').eq('game_id', gameId).single()
-    if (!data) return
-    const g = data.data
-    const updated = { ...g, answers: { ...(g.answers || {}), [key]: answer } }
-    await supabase.from('games').update({ data: updated }).eq('game_id', gameId)
-    setGame(updated)
-    setMyAnswers(prev => ({ ...prev, [game.currentQuestion]: answer }))
+    // One tiny row — no more rewriting the whole game blob (which used to let
+    // simultaneous answers wipe each other out and stall the host).
+    const { error: subErr } = await supabase.from('answers').upsert(
+      { game_id: gameId, player_name: playerName.trim(), question_idx: game.currentQuestion, answer },
+      { onConflict: 'game_id,player_name,question_idx' }
+    )
+    if (subErr) {
+      setSubmitted(false)
+      setSelectedAnswer(null)
+      setError('Answer failed to send — tap to try again.')
+      return
+    }
+    setError('')
+    setTableAnswers(prev => ({ ...prev, [key]: answer }))
     if (revealMode === 'auto') setTimeout(() => setAutoRevealed(true), 700)
   }
 
@@ -204,15 +250,15 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   function computeMyScore(g) {
     let score = 0
     ;(g.questions || []).forEach((q, i) => {
-      if ((g.answers || {})[`${playerName.trim()}:::${i}`] === q.author) score++
+      if (answersMap[`${playerName.trim()}:::${i}`] === q.author) score++
     })
     return score
   }
 
   function computeAllScores(g) {
     const scores = {}
-    ;(g.players || []).forEach(p => (scores[p.name] = 0))
-    Object.entries(g.answers || {}).forEach(([key, answer]) => {
+    playersArr.forEach(p => (scores[p.name] = 0))
+    Object.entries(answersMap).forEach(([key, answer]) => {
       const [pName, qIdxStr] = key.split(':::')
       const q = g.questions[parseInt(qIdxStr)]
       if (q && answer === q.author) scores[pName] = (scores[pName] || 0) + 1
@@ -246,10 +292,10 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
           <div style={p.welcomeBox}>{theme.welcomeMessage}</div>
         )}
         <div style={p.waiting}><span style={p.dot}>●</span> Waiting for host to start…</div>
-        <div style={{ textAlign: 'center', color: withAlpha(theme.textColor, 0.5), fontSize: 12, marginBottom: 12 }}>{(game?.players || []).length} player{(game?.players || []).length !== 1 ? 's' : ''} joined</div>
+        <div style={{ textAlign: 'center', color: withAlpha(theme.textColor, 0.5), fontSize: 12, marginBottom: 12 }}>{playersArr.length} player{playersArr.length !== 1 ? 's' : ''} joined</div>
         <div style={{ textAlign: 'center', fontSize: 13, color: withAlpha(theme.textColor, 0.65), marginBottom: 20 }}>You're in as <strong style={{ color: theme.primaryColor }}>{playerName}</strong></div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
-          {(game?.players || []).map(pl => (
+          {playersArr.map(pl => (
             <div key={pl.name} style={{ padding: '6px 14px', border: `1px solid ${pl.name === playerName ? theme.primaryColor : withAlpha(theme.textColor, 0.2)}`, background: pl.name === playerName ? withAlpha(theme.primaryColor, 0.1) : withAlpha(theme.textColor, 0.06), borderRadius: 20, fontSize: 12, color: theme.textColor }}>
               {pl.name === playerName ? '★ ' : ''}{pl.name}
             </div>
@@ -309,6 +355,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
           {submitted && !revealed && (
             <div style={p.locking}>{revealMode === 'manual' ? "Answer locked in — waiting for the host to reveal…" : 'Locking in your answer…'}</div>
           )}
+          {!submitted && error && <div style={p.err}>{error}</div>}
           {!submitted && <div style={p.tapHint}>Tap to answer</div>}
           {isMock && submitted && !revealed && revealMode === 'manual' && (
             <button style={{ ...p.joinBtn, marginTop: 8 }} onClick={mockReveal}>🎉 Reveal Answer (simulate host)</button>
@@ -322,7 +369,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
           {submitted && !revealImageVisible && q.revealImage && (
             <div style={{ textAlign: 'center', color: withAlpha(theme.textColor, 0.2), fontSize: 11, letterSpacing: 1, marginTop: 20 }}>Waiting for host reveal…</div>
           )}
-          {submitted && revealed && (game.players || []).length > 0 && (
+          {submitted && revealed && playersArr.length > 0 && (
             <div style={p.lbBox}>
               <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>SCOREBOARD SO FAR</div>
               {computeAllScores(game).map(([name, score], i) => (
@@ -375,7 +422,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
           <div style={{ marginTop: 28 }}>
             <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>YOUR ANSWERS</div>
             {game.questions.map((q, i) => {
-              const myAns = (game.answers || {})[`${playerName}:::${i}`]
+              const myAns = answersMap[`${playerName}:::${i}`]
               const correct = myAns === q.author
               return (
                 <div key={i} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${withAlpha(theme.textColor, 0.1)}` }}>

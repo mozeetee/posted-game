@@ -1,38 +1,15 @@
+-- MULTIPLAYER FIX MIGRATION
 -- Run this in your Supabase project: SQL Editor → New Query → paste → Run
+-- (Safe to run more than once.)
+--
+-- Why: player joins and answers used to be saved by rewriting the game's
+-- entire JSON blob (3+ MB with images). Two players writing at once wiped
+-- out each other's answers and could even undo the host advancing to the
+-- next question. These small tables give every join and every answer its
+-- own row, so nothing can clobber anything else — and gameplay traffic
+-- drops from megabytes to bytes.
 
--- Games table: stores all game state as a JSON blob
-create table if not exists games (
-  game_id text primary key,
-  data jsonb not null,
-  created_at timestamptz default now()
-);
-
--- Reveals table: tracks which questions have had their reveal image shown
-create table if not exists reveals (
-  game_id text not null,
-  question_idx integer not null,
-  created_at timestamptz default now(),
-  primary key (game_id, question_idx)
-);
-
--- Enable real-time for both tables
--- (Do this in Supabase Dashboard: Database → Replication → enable for games + reveals)
-
--- Allow public read/write access (no auth needed — anyone with your link can play)
-alter table games enable row level security;
-alter table reveals enable row level security;
-
-create policy "Public read games" on games for select using (true);
-create policy "Public insert games" on games for insert with check (true);
-create policy "Public update games" on games for update using (true);
-create policy "Public delete games" on games for delete using (true);
-
-create policy "Public read reveals" on reveals for select using (true);
-create policy "Public insert reveals" on reveals for insert with check (true);
-create policy "Public delete reveals" on reveals for delete using (true);
-
--- ── Multiplayer tables (one row per join / per answer — see supabase-migration-multiplayer.sql) ──
-
+-- One row per player who joined a game
 create table if not exists game_players (
   game_id text not null,
   player_name text not null,
@@ -40,6 +17,7 @@ create table if not exists game_players (
   primary key (game_id, player_name)
 );
 
+-- One row per answer a player submits
 create table if not exists answers (
   game_id text not null,
   player_name text not null,
@@ -52,15 +30,24 @@ create table if not exists answers (
 alter table game_players enable row level security;
 alter table answers enable row level security;
 
+drop policy if exists "Public read game_players" on game_players;
+drop policy if exists "Public insert game_players" on game_players;
+drop policy if exists "Public delete game_players" on game_players;
 create policy "Public read game_players" on game_players for select using (true);
 create policy "Public insert game_players" on game_players for insert with check (true);
 create policy "Public delete game_players" on game_players for delete using (true);
 
+drop policy if exists "Public read answers" on answers;
+drop policy if exists "Public insert answers" on answers;
+drop policy if exists "Public update answers" on answers;
+drop policy if exists "Public delete answers" on answers;
 create policy "Public read answers" on answers for select using (true);
 create policy "Public insert answers" on answers for insert with check (true);
 create policy "Public update answers" on answers for update using (true);
 create policy "Public delete answers" on answers for delete using (true);
 
+-- Atomic one-line game-state change, so "Next Question" no longer uploads
+-- the whole multi-megabyte game blob (and can't be clobbered mid-flight).
 create or replace function advance_game(gid text, new_status text, new_q integer)
 returns void
 language sql
@@ -70,6 +57,8 @@ as $$
   where game_id = gid;
 $$;
 
+-- Lightweight game list for the admin home screen (titles and counts only,
+-- instead of downloading every game's full blob with all its images).
 create or replace function list_games()
 returns table (game_id text, title text, status text, question_count integer, player_count integer, created_at timestamptz)
 language sql
