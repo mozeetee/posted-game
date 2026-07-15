@@ -60,10 +60,13 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [editDraft, setEditDraft] = useState(null)
   const [mockReturnScreen, setMockReturnScreen] = useState('manage')
   const [dashMode, setDashMode] = useState(() => localStorage.getItem(DASH_MODE_KEY) || 'dark')
-  // Live gameplay state from the small per-row tables (answers / game_players),
-  // so the manage screen never re-downloads the multi-MB game blob while running.
+  // Live gameplay state from the round_state() SQL function: players, totals,
+  // and current-round answers in one ~1KB response — the manage screen never
+  // re-downloads the game blob or the full answers list while running.
   const [liveAnswers, setLiveAnswers] = useState({})
   const [livePlayers, setLivePlayers] = useState([])
+  const [liveTotals, setLiveTotals] = useState([])
+  const [answersExist, setAnswersExist] = useState(false)
   const { s, c } = buildDashTheme(dashMode)
   const pendingSaveRef = useRef(false)
 
@@ -115,16 +118,20 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   useEffect(() => {
     if (screen !== 'manage' || !currentGame) return
     const gameId = currentGame.id
+    const qIdx = currentGame.currentQuestion
     let stopped = false
     async function tick() {
-      const [ans, pl, st] = await Promise.all([
-        supabase.from('answers').select('player_name,question_idx,answer').eq('game_id', gameId),
-        supabase.from('game_players').select('player_name').eq('game_id', gameId),
+      const [rs, st] = await Promise.all([
+        supabase.rpc('round_state', { gid: gameId, qidx: qIdx }),
         supabase.from('games').select('status:data->>status,current_question:data->currentQuestion').eq('game_id', gameId).single(),
       ])
       if (stopped) return
-      if (ans.data) setLiveAnswers(Object.fromEntries(ans.data.map(r => [`${r.player_name}:::${r.question_idx}`, r.answer])))
-      if (pl.data) setLivePlayers(pl.data.map(r => ({ name: r.player_name })))
+      if (rs.data) {
+        setLivePlayers(rs.data.map(r => ({ name: r.player_name })))
+        setLiveTotals(rs.data.map(r => [r.player_name, r.total]))
+        setLiveAnswers(Object.fromEntries(rs.data.filter(r => r.round_answer != null).map(r => [`${r.player_name}:::${qIdx}`, r.round_answer])))
+        if (rs.data.some(r => r.round_answer != null || r.total > 0)) setAnswersExist(true)
+      }
       if (st.data) setCurrentGame(g => {
         if (!g || (g.status === st.data.status && g.currentQuestion === st.data.current_question)) return g
         return { ...g, status: st.data.status, currentQuestion: st.data.current_question }
@@ -133,7 +140,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     tick()
     const poll = setInterval(tick, 2500)
     return () => { stopped = true; clearInterval(poll) }
-  }, [screen, currentGame?.id])
+  }, [screen, currentGame?.id, currentGame?.currentQuestion])
 
   // Home list needs titles and counts, not every game's full blob with all
   // its images — the list_games() function returns just those few columns.
@@ -159,6 +166,10 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     setGameTitle(data.data.title || '')
     setLiveAnswers({})
     setLivePlayers([])
+    setLiveTotals([])
+    // Header-only count: powers the "players already answered" editor warning
+    const { count } = await supabase.from('answers').select('*', { count: 'exact', head: true }).eq('game_id', gameId)
+    setAnswersExist((count || 0) > 0)
     setScreen('manage')
   }
 
@@ -295,7 +306,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
       supabase.from('game_players').delete().eq('game_id', currentGame.id),
     ])
     const ok = await advanceGameState('lobby', 0)
-    if (ok) { setRevealedMap({}); setLiveAnswers({}); setLivePlayers([]) }
+    if (ok) { setRevealedMap({}); setLiveAnswers({}); setLivePlayers([]); setLiveTotals([]); setAnswersExist(false) }
   }
 
   async function toggleReveal(qIdx) {
@@ -396,15 +407,9 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     try { await navigator.clipboard.writeText(getHostLink(game)); setHostCopied(true); setTimeout(() => setHostCopied(false), 2000) } catch {}
   }
 
-  function computeScores(game) {
-    const scores = {}
-    livePlayers.forEach(p => (scores[p.name] = 0))
-    Object.entries(liveAnswers).forEach(([key, answer]) => {
-      const [pName, qIdxStr] = key.split(':::')
-      const q = game.questions[parseInt(qIdxStr)]
-      if (q && answer === q.author) scores[pName] = (scores[pName] || 0) + 1
-    })
-    return Object.entries(scores).sort((a, b) => b[1] - a[1])
+  // Running totals come pre-computed and pre-sorted from round_state()
+  function computeScores() {
+    return liveTotals
   }
 
   // How often each person shows up as an answer choice vs. is the correct answer,
@@ -601,7 +606,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                   )}
                 </div>
               ))}
-              {Object.keys(liveAnswers).length > 0 && (
+              {answersExist && (
                 <div style={{ fontSize: 11, color: c.accent, background: withAlpha(c.accent, 0.07), border: `1px solid ${withAlpha(c.accent, 0.2)}`, borderRadius: 4, padding: '10px 14px', marginTop: 4 }}>
                   ⚠ Players have already answered some questions — editing, reordering, or removing questions now can mix up their scores. Best to reset the game after big changes.
                 </div>
@@ -774,7 +779,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
 
   // ── MANAGE ────────────────────────────────────────────────────────────────
   if (screen === 'manage' && currentGame) {
-    const scores = computeScores(currentGame)
+    const scores = computeScores()
     const personStats = computePersonStats(currentGame)
     const maxCorrect = Math.max(1, ...personStats.map(([, st]) => st.correct))
     const maxFeatured = Math.max(1, ...personStats.map(([, st]) => st.featured))

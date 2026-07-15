@@ -84,3 +84,22 @@ as $$
   from games g
   order by g.created_at desc;
 $$;
+
+-- ── Scale support (see supabase-migration-scale.sql) ──
+
+alter table answers add column if not exists correct boolean;
+
+create or replace function round_state(gid text, qidx integer)
+returns table (player_name text, total integer, round_answer text)
+language sql
+stable
+as $$
+  select p.player_name,
+         coalesce((select count(*)::integer from answers a
+                   where a.game_id = gid and a.player_name = p.player_name and a.correct), 0),
+         (select a2.answer from answers a2
+          where a2.game_id = gid and a2.player_name = p.player_name and a2.question_idx = qidx)
+  from game_players p
+  where p.game_id = gid
+  order by 2 desc, 1 asc;
+$$;

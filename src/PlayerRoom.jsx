@@ -15,10 +15,13 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   // Which question the "round results" interstitial is showing (set when the
   // host advances while this player is mid-game).
   const [lastRoundIdx, setLastRoundIdx] = useState(null)
-  // Answers and joined players live in their own small tables (one row each)
-  // so nothing rewrites the multi-MB game blob during play. These mirror them.
-  const [tableAnswers, setTableAnswers] = useState({})
-  const [playersList, setPlayersList] = useState([])
+  // Live state comes from the round_state() SQL function: every player, their
+  // running total (computed server-side), and their answer for one round.
+  // ~1KB per poll even with 20+ players, instead of shipping every answer row.
+  const [roundState, setRoundState] = useState({ qidx: null, byName: {} })
+  const [totalsRows, setTotalsRows] = useState([])
+  // Own per-question history, fetched once for the finished screen.
+  const [myHistory, setMyHistory] = useState({})
   const channelRef = useRef(null)
   const gameRef = useRef(null)
 
@@ -28,9 +31,26 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   // In manual mode the correct answer stays hidden until the host broadcasts
   // a reveal for this question (the same signal that shows the bonus image).
   const revealed = revealMode === 'manual' ? (submitted && revealImageVisible) : autoRevealed
-  // Mock preview keeps everything in-memory on the game object; real games use the tables.
-  const answersMap = isMock ? (game?.answers || {}) : tableAnswers
-  const playersArr = isMock ? (game?.players || []) : playersList
+  // Mock preview keeps everything in-memory on the game object; real games use the server.
+  const playersArr = isMock ? (game?.players || []) : totalsRows.map(([name]) => ({ name }))
+  const totalsView = isMock ? computeMockScores() : totalsRows
+
+  // Answer a player gave for a specific round (only the polled round is known in real games)
+  function getRoundAnswer(name, qidx) {
+    if (isMock) return (game?.answers || {})[`${name}:::${qidx}`]
+    return roundState.qidx === qidx ? roundState.byName[name] : undefined
+  }
+
+  function computeMockScores() {
+    const scores = {}
+    ;(game?.players || []).forEach(pl => (scores[pl.name] = 0))
+    Object.entries(game?.answers || {}).forEach(([key, answer]) => {
+      const [pName, qIdxStr] = key.split(':::')
+      const q = game.questions[parseInt(qIdxStr)]
+      if (q && answer === q.author) scores[pName] = (scores[pName] || 0) + 1
+    })
+    return Object.entries(scores).sort((a, b) => b[1] - a[1])
+  }
 
   // Fetch the game up front (before joining) so the join screen is themed too.
   useEffect(() => {
@@ -110,13 +130,12 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     setRevealImageVisible(!!(data && data.length > 0))
   }
 
-  async function refreshTables() {
-    const [ans, pl] = await Promise.all([
-      supabase.from('answers').select('player_name,question_idx,answer').eq('game_id', gameId),
-      supabase.from('game_players').select('player_name').eq('game_id', gameId),
-    ])
-    if (ans.data) setTableAnswers(Object.fromEntries(ans.data.map(r => [`${r.player_name}:::${r.question_idx}`, r.answer])))
-    if (pl.data) setPlayersList(pl.data.map(r => ({ name: r.player_name })))
+  // One server-side call: players + running totals + answers for one round.
+  async function refreshRoundState(qidx) {
+    const { data } = await supabase.rpc('round_state', { gid: gameId, qidx })
+    if (!data) return
+    setTotalsRows(data.map(r => [r.player_name, r.total]))
+    setRoundState({ qidx, byName: Object.fromEntries(data.filter(r => r.round_answer != null).map(r => [r.player_name, r.round_answer])) })
   }
 
   useEffect(() => {
@@ -145,12 +164,13 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
       ])
       if (st.data) applyGameState(st.data.status, st.data.current_question)
       if (rv.data) setRevealImageVisible(rv.data.length > 0)
-      // Players/answers only matter in the lobby (who's here) and after a
-      // reveal (scoreboard) — but they're tiny rows, so just keep them fresh.
-      refreshTables()
+      // On the interstitial we care about the round just played; otherwise the
+      // current question. Either way it's one ~1KB server-computed response.
+      const qidx = phase === 'between' && lastRoundIdx != null ? lastRoundIdx : gameRef.current?.currentQuestion
+      if (qidx != null) refreshRoundState(qidx)
     }, 2500)
     return () => clearInterval(poll)
-  }, [phase, gameId, isMock])
+  }, [phase, gameId, isMock, lastRoundIdx])
 
   async function joinGame() {
     setError('')
@@ -178,7 +198,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
 
     setGame(g)
     gameRef.current = g
-    await refreshTables()
+    await refreshRoundState(g.currentQuestion)
 
     // If they answered the current question before (e.g. phone reload), restore it
     const { data: mine } = await supabase.from('answers').select('answer')
@@ -208,8 +228,11 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
 
     // One tiny row — no more rewriting the whole game blob (which used to let
     // simultaneous answers wipe each other out and stall the host).
+    // Correctness is stored at submit time so the server can total scores
+    // without ever reading the big game blob.
+    const q = game.questions[game.currentQuestion]
     const { error: subErr } = await supabase.from('answers').upsert(
-      { game_id: gameId, player_name: playerName.trim(), question_idx: game.currentQuestion, answer },
+      { game_id: gameId, player_name: playerName.trim(), question_idx: game.currentQuestion, answer, correct: answer === q?.author },
       { onConflict: 'game_id,player_name,question_idx' }
     )
     if (subErr) {
@@ -219,7 +242,9 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
       return
     }
     setError('')
-    setTableAnswers(prev => ({ ...prev, [key]: answer }))
+    setRoundState(prev => prev.qidx === game.currentQuestion
+      ? { ...prev, byName: { ...prev.byName, [playerName.trim()]: answer } }
+      : { qidx: game.currentQuestion, byName: { [playerName.trim()]: answer } })
     if (revealMode === 'auto') setTimeout(() => setAutoRevealed(true), 700)
   }
 
@@ -262,24 +287,17 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     )
   }
 
-  function computeMyScore(g) {
-    let score = 0
-    ;(g.questions || []).forEach((q, i) => {
-      if (answersMap[`${playerName.trim()}:::${i}`] === q.author) score++
-    })
-    return score
+  function computeMyScore() {
+    const row = totalsView.find(([name]) => name === playerName.trim())
+    return row ? row[1] : 0
   }
 
-  function computeAllScores(g) {
-    const scores = {}
-    playersArr.forEach(p => (scores[p.name] = 0))
-    Object.entries(answersMap).forEach(([key, answer]) => {
-      const [pName, qIdxStr] = key.split(':::')
-      const q = g.questions[parseInt(qIdxStr)]
-      if (q && answer === q.author) scores[pName] = (scores[pName] || 0) + 1
-    })
-    return Object.entries(scores).sort((a, b) => b[1] - a[1])
-  }
+  // Fetch this player's per-question history once for the finished screen
+  useEffect(() => {
+    if (isMock || phase !== 'finished' || !playerName.trim()) return
+    supabase.from('answers').select('question_idx,answer').eq('game_id', gameId).eq('player_name', playerName.trim())
+      .then(({ data }) => { if (data) setMyHistory(Object.fromEntries(data.map(r => [r.question_idx, r.answer]))) })
+  }, [phase, isMock, gameId])
 
   // ── JOIN ──────────────────────────────────────────────────────────────────
   if (phase === 'join') return wrapMock(
@@ -388,7 +406,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
             <div style={p.lbBox}>
               <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>THIS ROUND</div>
               {playersArr.map(pl => {
-                const ans = answersMap[`${pl.name}:::${game.currentQuestion}`]
+                const ans = getRoundAnswer(pl.name, game.currentQuestion)
                 const state = ans == null ? 'waiting' : ans === q.author ? 'right' : 'wrong'
                 return (
                   <div key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', borderRadius: 4, background: pl.name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
@@ -418,7 +436,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   if (phase === 'between' && game) {
     const li = lastRoundIdx
     const lq = li != null ? game.questions[li] : null
-    const totals = computeAllScores(game)
+    const totals = totalsView
     return wrapMock(
       <ThemedPage theme={theme}>
         <div style={p.card}>
@@ -428,7 +446,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
               <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 6 }}>ROUND {li + 1} RESULTS</div>
               <div style={{ fontSize: 12, color: withAlpha(theme.textColor, 0.65), marginBottom: 14 }}>The answer was <strong style={{ color: theme.secondaryColor }}>{lq.author}</strong></div>
               {playersArr.map(pl => {
-                const ans = answersMap[`${pl.name}:::${li}`]
+                const ans = getRoundAnswer(pl.name, li)
                 const state = ans == null ? 'none' : ans === lq.author ? 'right' : 'wrong'
                 return (
                   <div key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', borderRadius: 4, background: pl.name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
@@ -460,8 +478,8 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
 
   // ── FINISHED ──────────────────────────────────────────────────────────────
   if (phase === 'finished' && game) {
-    const myScore = computeMyScore(game)
-    const allScores = computeAllScores(game)
+    const myScore = computeMyScore()
+    const allScores = totalsView
     const myRank = allScores.findIndex(([name]) => name === playerName) + 1
     const total = game.questions.length
 
@@ -489,7 +507,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
           <div style={{ marginTop: 28 }}>
             <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>YOUR ANSWERS</div>
             {game.questions.map((q, i) => {
-              const myAns = answersMap[`${playerName}:::${i}`]
+              const myAns = isMock ? (game.answers || {})[`${playerName}:::${i}`] : myHistory[i]
               const correct = myAns === q.author
               return (
                 <div key={i} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${withAlpha(theme.textColor, 0.1)}` }}>
