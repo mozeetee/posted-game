@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route, useSearchParams } from 'react-router-dom'
 import HostDashboard from './HostDashboard'
 import PlayerRoom from './PlayerRoom'
+import BigScreen from './BigScreen'
 
 function App() {
   const [params] = useSearchParams()
@@ -13,6 +14,11 @@ function App() {
   // Optional &name=Sarah pre-fills the guest's name on the join screen
   if (role === 'player' && gameId) {
     return <PlayerRoom gameId={gameId} initialName={params.get('name') || ''} />
+  }
+
+  // ?game=XXX&role=screen → read-only TV/big-screen view for the whole room
+  if (role === 'screen' && gameId) {
+    return <BigScreen gameId={gameId} />
   }
 
   // ?game=XXX&role=host&key=SECRET → host view locked to one game

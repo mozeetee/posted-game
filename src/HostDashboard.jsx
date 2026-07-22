@@ -53,6 +53,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [guestName, setGuestName] = useState('')
   const [guestCopied, setGuestCopied] = useState(false)
   const [hostCopied, setHostCopied] = useState(false)
+  const [screenCopied, setScreenCopied] = useState(false)
   const [unlocked, setUnlocked] = useState(isHostMode || localStorage.getItem(ADMIN_UNLOCK_STORAGE_KEY) === ADMIN_PASSWORD_HASH)
   const [pwInput, setPwInput] = useState('')
   const [pwError, setPwError] = useState('')
@@ -416,6 +417,14 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
 
   function getHostLink(game) {
     return `${window.location.origin}/?game=${game.id}&role=host&key=${game.hostKey || ''}`
+  }
+
+  function getScreenLink(gameId) {
+    return `${window.location.origin}/?game=${gameId}&role=screen`
+  }
+
+  async function copyScreenLink(gameId) {
+    try { await navigator.clipboard.writeText(getScreenLink(gameId)); setScreenCopied(true); setTimeout(() => setScreenCopied(false), 2000) } catch {}
   }
 
   // Games created before host links exist get a key generated on first copy
@@ -845,6 +854,14 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               </div>
             )}
           </div>
+          <div style={{ ...s.shareBox, borderColor: withAlpha(c.success, 0.3) }}>
+            <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 6 }}>📺 BIG SCREEN — CAST TO A TV</div>
+            <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10, lineHeight: 1.5 }}>A shared view for the room: the question, live "locked in" counter, the reveal, and the leaderboard. Open it on a laptop plugged into a TV, or cast the browser tab. It follows along automatically — no clicking needed.</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button style={{ ...s.copyBtn, background: c.success, color: c.successText }} onClick={() => window.open(getScreenLink(currentGame.id), '_blank')}>Open Big Screen ↗</button>
+              <button style={{ ...s.copyBtn, background: 'none', color: c.success, border: `1px solid ${withAlpha(c.success, 0.4)}` }} onClick={() => copyScreenLink(currentGame.id)}>{screenCopied ? '✓ Copied!' : 'Copy Link'}</button>
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('questions'); setScreen('create') }}>✎ Edit Questions</button>
             <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('customize'); setScreen('create') }}>🎨 Customize Theme</button>
@@ -955,7 +972,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                   )}
                 </div>
               ) : (
-                <div style={{ fontSize: 11, color: c.textGhost, marginBottom: 12, padding: '10px 14px', background: c.cardAlt, borderRadius: 4, border: `1px dashed ${c.borderSoft}` }}>No reveal image for this question — answers reveal automatically to each player.</div>
+                <div style={s.revealBox}>
+                  <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 8 }}>📺 REVEAL ON BIG SCREEN</div>
+                  <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10 }}>Phones reveal on their own as each person answers. The big screen flips to the answer + leaderboard once everyone's in — tap here to reveal it to the room sooner.</div>
+                  <button style={s.showRevealBtn} onClick={() => toggleReveal(qIdx)}>{isRevealed ? '✓ Revealed to the room' : '📺 Reveal Answer to the Room'}</button>
+                </div>
               )}
               <button style={{ ...s.bigBtn, background: c.accent, color: c.accentText, marginTop: 12, opacity: advancing ? 0.6 : 1 }} onClick={nextQuestion} disabled={advancing}>
                 {advancing ? 'Advancing…' : qIdx + 1 >= currentGame.questions.length ? 'Finish Game →' : 'Next Question →'}
