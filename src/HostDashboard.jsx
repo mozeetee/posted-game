@@ -67,6 +67,10 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [livePlayers, setLivePlayers] = useState([])
   const [liveTotals, setLiveTotals] = useState([])
   const [answersExist, setAnswersExist] = useState(false)
+  // True while a start/next/finish request is in flight, so the button can't
+  // be double-clicked into skipping a question (the reported bug).
+  const [advancing, setAdvancing] = useState(false)
+  const advancingRef = useRef(false)
   const { s, c } = buildDashTheme(dashMode)
   const pendingSaveRef = useRef(false)
 
@@ -134,6 +138,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
       }
       if (st.data) setCurrentGame(g => {
         if (!g || (g.status === st.data.status && g.currentQuestion === st.data.current_question)) return g
+        // Guard against a stale read landing right after an optimistic advance:
+        // during active play the question only ever moves forward, so ignore a
+        // server value that's behind our local one (a genuine external change —
+        // reset, or another host tab jumping ahead — still differs and applies).
+        if (g.status === 'active' && st.data.status === 'active' && st.data.current_question < g.currentQuestion) return g
         return { ...g, status: st.data.status, currentQuestion: st.data.current_question }
       })
     }
@@ -277,13 +286,25 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   }
 
   // Game-flow changes are one tiny atomic database call (advance_game) instead
-  // of re-uploading the whole multi-MB blob — instant, and immune to being
-  // clobbered by player answer writes.
+  // of re-uploading the whole multi-MB blob. The host view updates optimistically
+  // (instant feedback, no dead-time where a slow-wifi host thinks the click
+  // didn't register and clicks again), and advancingRef blocks overlapping
+  // calls so a double-click can't skip a question.
   async function advanceGameState(status, currentQuestion) {
+    if (advancingRef.current) return false
+    advancingRef.current = true
+    setAdvancing(true)
     setSaveError('')
-    const { error } = await supabase.rpc('advance_game', { gid: currentGame.id, new_status: status, new_q: currentQuestion })
-    if (error) { setSaveError('Update failed: ' + error.message); return false }
+    const prev = currentGame
     setCurrentGame(g => ({ ...g, status, currentQuestion }))
+    const { error } = await supabase.rpc('advance_game', { gid: currentGame.id, new_status: status, new_q: currentQuestion })
+    advancingRef.current = false
+    setAdvancing(false)
+    if (error) {
+      setSaveError('Update failed: ' + error.message)
+      setCurrentGame(prev) // roll back the optimistic move
+      return false
+    }
     return true
   }
 
@@ -292,6 +313,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   }
 
   async function nextQuestion() {
+    if (advancingRef.current) return
     const next = currentGame.currentQuestion + 1
     setRevealedMap(m => ({ ...m, [next]: false }))
     // clear reveal flag for next question
@@ -872,7 +894,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
             </div>
           )}
           {currentGame.status === 'lobby' && (
-            <button style={{ ...s.bigBtn, background: c.success, color: c.successText }} onClick={startGame}>🚀 Start Game</button>
+            <button style={{ ...s.bigBtn, background: c.success, color: c.successText, opacity: advancing ? 0.6 : 1 }} onClick={startGame} disabled={advancing}>{advancing ? 'Starting…' : '🚀 Start Game'}</button>
           )}
           {currentGame.status === 'active' && q && (
             <div style={s.activeCard}>
@@ -935,8 +957,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               ) : (
                 <div style={{ fontSize: 11, color: c.textGhost, marginBottom: 12, padding: '10px 14px', background: c.cardAlt, borderRadius: 4, border: `1px dashed ${c.borderSoft}` }}>No reveal image for this question — answers reveal automatically to each player.</div>
               )}
-              <button style={{ ...s.bigBtn, background: c.accent, color: c.accentText, marginTop: 12 }} onClick={nextQuestion}>
-                {qIdx + 1 >= currentGame.questions.length ? 'Finish Game →' : 'Next Question →'}
+              <button style={{ ...s.bigBtn, background: c.accent, color: c.accentText, marginTop: 12, opacity: advancing ? 0.6 : 1 }} onClick={nextQuestion} disabled={advancing}>
+                {advancing ? 'Advancing…' : qIdx + 1 >= currentGame.questions.length ? 'Finish Game →' : 'Next Question →'}
               </button>
             </div>
           )}
