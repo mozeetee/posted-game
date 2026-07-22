@@ -61,14 +61,18 @@ export default function BigScreen({ gameId }) {
         setTotals(rs.data.map(r => [r.player_name, r.total]))
         setRoundAnswers(Object.fromEntries(rs.data.filter(r => r.round_answer != null).map(r => [r.player_name, r.round_answer])))
       }
-      // Reveal on the big screen when the host flags it OR everyone has answered.
-      const flagged = !!(rv.data && rv.data.length > 0)
-      const allIn = rs.data && rs.data.length > 0 && rs.data.every(r => r.round_answer != null)
-      setRevealed(flagged || allIn)
+      // Reveal on the big screen ONLY when the host explicitly reveals to the
+      // room (sets the reveal flag). Never auto-reveal — the host controls the
+      // moment, so the answer can't spoil before they're ready.
+      setRevealed(!!(rv.data && rv.data.length > 0))
     }
     tick()
     const poll = setInterval(tick, 2000)
-    return () => { stopped = true; clearInterval(poll) }
+    // Browsers throttle timers in background tabs. If the big-screen tab is ever
+    // briefly backgrounded, snap it straight back in sync the moment it's shown.
+    const onVisible = () => { if (document.visibilityState === 'visible') tick() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { stopped = true; clearInterval(poll); document.removeEventListener('visibilitychange', onVisible) }
   }, [gameId])
 
   const s = buildScreenStyles(theme)
