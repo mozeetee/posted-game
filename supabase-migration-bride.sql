@@ -13,6 +13,11 @@ create table if not exists survey_responses (
   primary key (game_id, question_id)
 );
 
+-- `prompt` holds a question the BRIDE suggested herself (null for the host's
+-- preloaded questions); `passed` is true when she chose to skip a question.
+alter table survey_responses add column if not exists prompt text;
+alter table survey_responses add column if not exists passed boolean default false;
+
 -- One row per game: flipped to submitted = true when the bride taps Submit.
 -- The host dashboard polls this (plus a response count) to show live status.
 create table if not exists survey_meta (

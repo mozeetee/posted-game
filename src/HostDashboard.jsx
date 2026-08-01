@@ -475,14 +475,30 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   // (and first choice), so the host can add decoys and build the trivia.
   async function pullBrideAnswers() {
     setPullingAnswers(true)
-    const { data } = await supabase.from('survey_responses').select('question_id, answer').eq('game_id', currentGame.id)
-    const byId = Object.fromEntries((data || []).map(r => [r.question_id, (r.answer || '').trim()]))
-    const questions = currentGame.questions.map(q => {
-      const ans = byId[String(q.id)]
-      if (!ans) return q
+    const { data } = await supabase.from('survey_responses').select('*').eq('game_id', currentGame.id)
+    const rows = data || []
+    // Split her responses: answers/passes to preloaded questions vs. questions
+    // she suggested herself (those carry a `prompt`).
+    const byId = {}
+    const brideAdded = []
+    rows.forEach(r => {
+      if (r.prompt && r.prompt.trim()) brideAdded.push({ id: r.question_id, prompt: r.prompt.trim(), answer: (r.answer || '').trim() })
+      else byId[r.question_id] = { answer: (r.answer || '').trim(), passed: !!r.passed }
+    })
+    let questions = currentGame.questions.map(q => {
+      const row = byId[String(q.id)]
+      if (!row) return q
+      if (row.passed) return { ...q, passedByBride: true, brideAnswer: '', author: '', choices: [] }
+      if (!row.answer) return { ...q, passedByBride: false }
       // Seed the correct answer + keep any decoys the host already added.
-      const existingDecoys = (q.choices || []).filter(c => c && c !== ans && c !== q.brideAnswer)
-      return { ...q, brideAnswer: ans, author: ans, choices: [ans, ...existingDecoys] }
+      const existingDecoys = (q.choices || []).filter(c => c && c !== row.answer && c !== q.brideAnswer)
+      return { ...q, passedByBride: false, brideAnswer: row.answer, author: row.answer, choices: [row.answer, ...existingDecoys] }
+    })
+    // Append her own suggested questions (idempotent: track their survey id).
+    const seen = new Set(questions.map(q => q.brideSurveyId).filter(Boolean))
+    brideAdded.forEach((a, i) => {
+      if (seen.has(a.id)) return
+      questions.push({ id: Date.now() + i, brideSurveyId: a.id, round: "Bride's Picks", post: a.prompt, brideAnswer: a.answer, author: a.answer, choices: a.answer ? [a.answer] : [], questionImage: null, revealImage: null })
     })
     const updated = { ...currentGame, questions, surveyStatus: 'ready' }
     setCurrentGame(updated)
@@ -501,6 +517,19 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
         const decoys = (q.choices || []).slice(1)
         decoys[decoyIdx] = val
         return { ...q, choices: [q.brideAnswer || q.author || q.choices?.[0] || '', ...decoys] }
+      }),
+    }))
+  }
+
+  // Let the host type the correct answer themselves for a question the bride
+  // passed on or left blank (becomes choices[0] + the scored answer).
+  function updateBrideCorrect(qId, val) {
+    setCurrentGame(g => ({
+      ...g,
+      questions: g.questions.map(q => {
+        if (q.id !== qId) return q
+        const decoys = (q.choices || []).slice(1)
+        return { ...q, author: val, choices: [val, ...decoys] }
       }),
     }))
   }
@@ -768,9 +797,10 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                       </div>
                       <button style={s.x} onClick={() => removeQuestion(q.id)}>✕</button>
                     </div>
+                    {q.brideSurveyId && <span style={{ ...chip(c.success), alignSelf: 'flex-start' }}>💡 the bride's own question</span>}
                     {q.brideAnswer ? (
                       <>
-                        <div style={{ fontSize: 12, color: c.success, fontWeight: 700, padding: '8px 12px', background: withAlpha(c.success, 0.1), border: `1px solid ${withAlpha(c.success, 0.3)}`, borderRadius: 6 }}>✓ {q.brideAnswer} <span style={{ color: c.textFaint, fontWeight: 400 }}>· the bride's answer</span></div>
+                        <div style={{ fontSize: 12, color: c.success, fontWeight: 700, padding: '8px 12px', background: withAlpha(c.success, 0.1), border: `1px solid ${withAlpha(c.success, 0.3)}`, borderRadius: 6 }}>✓ {q.brideAnswer} <span style={{ color: c.textFaint, fontWeight: 400 }}>· the correct answer</span></div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                           {[0, 1, 2].map(di => (
                             <input key={di} style={s.input} placeholder={`Wrong answer ${di + 1}`} value={decoys[di] || ''} onChange={e => updateBrideDecoy(q.id, di, e.target.value)} />
@@ -779,7 +809,26 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                         {totalChoices < 2 && <div style={{ fontSize: 11, color: c.danger }}>⚠ Add at least one wrong answer.</div>}
                       </>
                     ) : (
-                      <div style={{ fontSize: 12, color: c.textFaint, fontStyle: 'italic' }}>Waiting on the bride's answer for this one.</div>
+                      <>
+                        <div style={{ fontSize: 12, color: q.passedByBride ? c.accent : c.textFaint, fontStyle: 'italic' }}>
+                          {q.passedByBride
+                            ? '⤼ The bride passed on this one. Fill in the answer to keep it, or remove it.'
+                            : q.brideSurveyId
+                            ? 'She suggested this but left the answer blank — add the correct answer to use it.'
+                            : 'No answer yet — fill it in yourself, or leave it for the bride.'}
+                        </div>
+                        <input style={s.input} placeholder="Correct answer" value={q.choices?.[0] || ''} onChange={e => updateBrideCorrect(q.id, e.target.value)} />
+                        {(q.choices?.[0] || '').trim() && (
+                          <>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                              {[0, 1, 2].map(di => (
+                                <input key={di} style={s.input} placeholder={`Wrong answer ${di + 1}`} value={decoys[di] || ''} onChange={e => updateBrideDecoy(q.id, di, e.target.value)} />
+                              ))}
+                            </div>
+                            {totalChoices < 2 && <div style={{ fontSize: 11, color: c.danger }}>⚠ Add at least one wrong answer.</div>}
+                          </>
+                        )}
+                      </>
                     )}
                   </div>
                 )
