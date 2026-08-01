@@ -357,7 +357,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
             </div>
           </div>
           <div style={p.bubble}>
-            <div style={p.handle}>@someone</div>
+            {game.edition !== 'bride' && <div style={p.handle}>@someone</div>}
             {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, marginBottom: 10, marginTop: 4, display: 'block' }} />}
             <div style={p.postText}>{q.post}</div>
           </div>

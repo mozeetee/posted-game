@@ -72,7 +72,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [surveyStatus, setSurveyStatus] = useState({ submitted: false, count: 0 })
   const [surveyCopied, setSurveyCopied] = useState(false)
   const [pullingAnswers, setPullingAnswers] = useState(false)
-  const { s, c } = buildDashTheme(dashMode)
+  const { s, c } = buildDashTheme(dashMode, currentGame?.edition)
   const pendingSaveRef = useRef(false)
 
   function toggleDashMode() {
@@ -1361,13 +1361,30 @@ const DASH_PALETTES = {
     success: '#0e9f63', successText: '#ffffff',
     danger: '#d94854',
   },
+  // Bridal chrome (blush + gold on plum) so a Bride Edition game's dashboard
+  // reads clearly different from the 'posted' game's gold + green.
+  brideDark: {
+    bg: '#160f1c', card: '#241830', cardAlt: '#1e1526', border: '#3a2b3f', borderSoft: '#2e2233',
+    text: '#f7ecf0', textDim: '#e8dbe2', textMuted: '#c4a9b6', textFaint: '#8a6f7d', textGhost: '#4a3a44',
+    accent: '#d8899b', accentText: '#1a1220',
+    success: '#c9a227', successText: '#1a1220',
+    danger: '#e07a8a',
+  },
+  brideLight: {
+    bg: '#faf3f6', card: '#ffffff', cardAlt: '#f6eef2', border: '#ecdbe3', borderSoft: '#f2e6ec',
+    text: '#2a1a24', textDim: '#3d2a34', textMuted: '#6d5560', textFaint: '#9a8290', textGhost: '#cbb9c2',
+    accent: '#c25f7a', accentText: '#ffffff',
+    success: '#a5851d', successText: '#ffffff',
+    danger: '#c94f5f',
+  },
 }
 
 // Builds the admin/host dashboard's own chrome styling (distinct from each
 // game's player-facing theme). Returns `s` (ready-to-use style objects) and
 // `c` (the raw palette) for one-off inline styling.
-function buildDashTheme(mode) {
-  const c = DASH_PALETTES[mode] || DASH_PALETTES.dark
+function buildDashTheme(mode, edition) {
+  const key = edition === 'bride' ? (mode === 'light' ? 'brideLight' : 'brideDark') : mode
+  const c = DASH_PALETTES[key] || DASH_PALETTES.dark
   const bodyFont = "'Poppins', sans-serif"
   const s = {
     page: { minHeight: '100vh', background: c.bg, color: c.text, fontFamily: bodyFont, padding: '0 0 80px' },
