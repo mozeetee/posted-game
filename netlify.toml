@@ -5,6 +5,7 @@
   query = { role = "bride" }
   to = "/bride.html"
   status = 200
+  force = true
 
 [[redirects]]
   from = "/*"
