@@ -220,7 +220,7 @@ export default function BrideSurvey({ gameId, surveyKey = '' }) {
         <div style={{ marginBottom: 26 }}>
           <div style={s.roundLabel}>Your Own Questions <span style={{ color: withAlpha(theme.textColor, 0.5), fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></div>
           <div style={{ ...s.muted, textAlign: 'left', marginBottom: 14 }}>
-            Have a question you'd love the group to guess? Add it here. Include the answer so it can be scored — or leave the answer blank to just suggest it to your host.
+            Have a question you'd love the group to guess? Add it here. Include the answer so it can be scored.
           </div>
           {added.map(a => (
             <div key={a.id} style={s.addedCard}>
