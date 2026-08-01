@@ -1,3 +1,11 @@
+# Bride-survey links (?role=bride) get their own HTML so link previews show a
+# personal bridal card. It boots the same SPA. Must come before the catch-all.
+[[redirects]]
+  from = "/*"
+  query = { role = "bride" }
+  to = "/bride.html"
+  status = 200
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
