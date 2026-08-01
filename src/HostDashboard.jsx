@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import { ImageUploadSlot } from './ImageUpload'
 import { compressImage, readFileAsDataUrl } from './ImageUpload'
-import { DEFAULT_THEME, THEME_PRESETS, FONT_OPTIONS, getTheme, ensureGoogleFont, withAlpha, contrastColor, BRAND_NAME, BRAND_TAGLINE } from './theme'
+import { DEFAULT_THEME, THEME_PRESETS, FONT_OPTIONS, getTheme, ensureGoogleFont, withAlpha, contrastColor, BRAND_NAME, BRAND_TAGLINE, EDITIONS, getEditionConfig } from './theme'
 import PlayerRoom from './PlayerRoom'
 
 const DASH_MODE_KEY = 'wpt_dash_mode'
@@ -31,12 +31,6 @@ async function sha256Hex(text) {
 }
 
 const EMPTY_POST = { post: '', author: '', choices: ['', '', '', ''], questionImage: null, revealImage: null, questionLabel: '' }
-
-const SAMPLE_QUESTIONS = [
-  { id: 1, post: "Just spent 3 hours reorganizing my spice cabinet alphabetically. No regrets.", author: "Alex", choices: ["Alex", "Jordan", "Sam", "Riley"], questionImage: null, revealImage: null },
-  { id: 2, post: "Unpopular opinion: pineapple on pizza is objectively correct and I won't be taking questions.", author: "Sam", choices: ["Alex", "Jordan", "Sam", "Riley"], questionImage: null, revealImage: null },
-  { id: 3, post: "Why do I always have the best ideas at 2am? Probably going to patent this tomorrow.", author: "Riley", choices: ["Alex", "Jordan", "Sam", "Riley"], questionImage: null, revealImage: null },
-]
 
 export default function HostDashboard({ hostGameId = null, hostAccessKey = '' }) {
   const isHostMode = !!hostGameId
@@ -72,6 +66,12 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   // be double-clicked into skipping a question (the reported bug).
   const [advancing, setAdvancing] = useState(false)
   const advancingRef = useRef(false)
+  // Bride Edition: edition chooser on the home screen, plus live survey status
+  // (whether the bride has submitted and how many she's answered).
+  const [showEditionPicker, setShowEditionPicker] = useState(false)
+  const [surveyStatus, setSurveyStatus] = useState({ submitted: false, count: 0 })
+  const [surveyCopied, setSurveyCopied] = useState(false)
+  const [pullingAnswers, setPullingAnswers] = useState(false)
   const { s, c } = buildDashTheme(dashMode)
   const pendingSaveRef = useRef(false)
 
@@ -151,6 +151,27 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     const poll = setInterval(tick, 2500)
     return () => { stopped = true; clearInterval(poll) }
   }, [screen, currentGame?.id, currentGame?.currentQuestion])
+
+  // Bride Edition: poll the survey tables while the host is setting up or
+  // managing the game, so "Awaiting bride… → Submitted (X/N)" updates live.
+  useEffect(() => {
+    if (currentGame?.edition !== 'bride') return
+    if (screen !== 'create' && screen !== 'manage') return
+    const gameId = currentGame.id
+    let stopped = false
+    async function tick() {
+      const [meta, resp] = await Promise.all([
+        supabase.from('survey_meta').select('submitted').eq('game_id', gameId).maybeSingle(),
+        supabase.from('survey_responses').select('answer').eq('game_id', gameId),
+      ])
+      if (stopped) return
+      const count = (resp.data || []).filter(r => (r.answer || '').trim()).length
+      setSurveyStatus({ submitted: !!meta.data?.submitted, count })
+    }
+    tick()
+    const poll = setInterval(tick, 3000)
+    return () => { stopped = true; clearInterval(poll) }
+  }, [screen, currentGame?.id, currentGame?.edition])
 
   // Home list needs titles and counts, not every game's full blob with all
   // its images — the list_games() function returns just those few columns.
@@ -244,20 +265,32 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
       supabase.from('reveals').delete().eq('game_id', gameId),
       supabase.from('answers').delete().eq('game_id', gameId),
       supabase.from('game_players').delete().eq('game_id', gameId),
+      supabase.from('survey_responses').delete().eq('game_id', gameId),
+      supabase.from('survey_meta').delete().eq('game_id', gameId),
     ])
     await loadGames()
     if (currentGame?.id === gameId) { setCurrentGame(null); setScreen('home') }
   }
 
-  function startNewGame() {
+  function startNewGame(edition = 'posted') {
     const id = generateGameId()
-    setCurrentGame({ id, title: '', hostKey: generateHostKey(), theme: { ...DEFAULT_THEME }, questions: SAMPLE_QUESTIONS, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(), answers: {}, revealMode: 'auto' })
+    const cfg = getEditionConfig(edition)
+    // Deep-clone the starter questions so edits don't mutate the shared samples.
+    const questions = cfg.sampleQuestions.map(q => ({ ...q, choices: [...(q.choices || [])] }))
+    const base = {
+      id, title: '', hostKey: generateHostKey(), edition, theme: { ...cfg.defaultTheme },
+      questions, players: [], status: 'lobby', currentQuestion: 0, createdAt: Date.now(),
+      answers: {}, revealMode: 'auto',
+    }
+    if (edition === 'bride') { base.brideName = ''; base.surveyKey = generateHostKey(); base.surveyStatus = 'building' }
+    setCurrentGame(base)
     setGameTitle('')
     setNewPost(EMPTY_POST)
     setEditingId(null)
     setEditDraft(null)
+    setShowEditionPicker(false)
     setScreen('create')
-    setActiveTab('questions')
+    setActiveTab(edition === 'bride' ? 'survey' : 'questions')
   }
 
   async function startMockPreview(fromScreen) {
@@ -423,6 +456,64 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     return `${window.location.origin}/?game=${gameId}&role=screen`
   }
 
+  // Bride Edition: the private link the bride uses to fill in her real answers.
+  function getSurveyLink(game) {
+    return `${window.location.origin}/?game=${game.id}&role=bride&key=${game.surveyKey || ''}`
+  }
+
+  async function copySurveyLink() {
+    let game = currentGame
+    if (!game.surveyKey) game = { ...game, surveyKey: generateHostKey() }
+    // Persist the game so the bride's link resolves to a real row (a brand-new
+    // game may not be saved yet if the host hasn't typed a title).
+    await saveGame({ ...game, title: gameTitle })
+    setCurrentGame(game)
+    try { await navigator.clipboard.writeText(getSurveyLink(game)); setSurveyCopied(true); setTimeout(() => setSurveyCopied(false), 2000) } catch {}
+  }
+
+  // Pull the bride's submitted answers into the questions as the correct answer
+  // (and first choice), so the host can add decoys and build the trivia.
+  async function pullBrideAnswers() {
+    setPullingAnswers(true)
+    const { data } = await supabase.from('survey_responses').select('question_id, answer').eq('game_id', currentGame.id)
+    const byId = Object.fromEntries((data || []).map(r => [r.question_id, (r.answer || '').trim()]))
+    const questions = currentGame.questions.map(q => {
+      const ans = byId[String(q.id)]
+      if (!ans) return q
+      // Seed the correct answer + keep any decoys the host already added.
+      const existingDecoys = (q.choices || []).filter(c => c && c !== ans && c !== q.brideAnswer)
+      return { ...q, brideAnswer: ans, author: ans, choices: [ans, ...existingDecoys] }
+    })
+    const updated = { ...currentGame, questions, surveyStatus: 'ready' }
+    setCurrentGame(updated)
+    await saveGame({ ...updated, title: gameTitle })
+    setPullingAnswers(false)
+    setActiveTab('questions')
+  }
+
+  // Update one decoy (wrong answer) for a bride question. The bride's answer is
+  // always choices[0]; decoys fill the rest.
+  function updateBrideDecoy(qId, decoyIdx, val) {
+    setCurrentGame(g => ({
+      ...g,
+      questions: g.questions.map(q => {
+        if (q.id !== qId) return q
+        const decoys = (q.choices || []).slice(1)
+        decoys[decoyIdx] = val
+        return { ...q, choices: [q.brideAnswer || q.author || q.choices?.[0] || '', ...decoys] }
+      }),
+    }))
+  }
+
+  // Edit a bride question's prompt text (before the survey is sent).
+  function updateBridePrompt(qId, val) {
+    setCurrentGame(g => ({ ...g, questions: g.questions.map(q => q.id === qId ? { ...q, post: val } : q) }))
+  }
+
+  function addBridePrompt() {
+    setCurrentGame(g => ({ ...g, questions: [...g.questions, { id: Date.now(), post: '', round: '', author: '', choices: [], questionImage: null, revealImage: null }] }))
+  }
+
   async function copyScreenLink(gameId) {
     try { await navigator.clipboard.writeText(getScreenLink(gameId)); setScreenCopied(true); setTimeout(() => setScreenCopied(false), 2000) } catch {}
   }
@@ -511,7 +602,25 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
           <img src="/logo.svg" alt={BRAND_NAME} style={{ ...s.logoImg, margin: '0 auto 16px' }} />
           <p style={s.tagline}>{BRAND_TAGLINE}</p>
         </header>
-        <button style={s.bigBtn} onClick={startNewGame}><span>＋</span> Create New Game</button>
+        {!showEditionPicker ? (
+          <button style={s.bigBtn} onClick={() => setShowEditionPicker(true)}><span>＋</span> Create New Game</button>
+        ) : (
+          <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 10, padding: 16 }}>
+            <h2 style={{ ...s.sectionTitle, marginBottom: 12 }}>CHOOSE AN EDITION</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {Object.values(EDITIONS).map(ed => (
+                <button key={ed.id} style={{ display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 8, padding: '14px 16px', cursor: 'pointer', color: c.text, fontFamily: "'Poppins', sans-serif" }} onClick={() => startNewGame(ed.id)}>
+                  <span style={{ fontSize: 26 }}>{ed.emoji}</span>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <span style={{ fontWeight: 800, fontSize: 15 }}>{ed.label}</span>
+                    <span style={{ fontSize: 12, color: c.textFaint, lineHeight: 1.4 }}>{ed.blurb}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button style={{ ...s.ghost, marginTop: 12 }} onClick={() => setShowEditionPicker(false)}>Cancel</button>
+          </div>
+        )}
         {games.length > 0 && (
           <div style={s.section}>
             <h2 style={s.sectionTitle}>YOUR GAMES</h2>
@@ -550,6 +659,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   // ── CREATE ────────────────────────────────────────────────────────────────
   if (screen === 'create') {
     const theme = getTheme(currentGame)
+    const isBride = currentGame.edition === 'bride'
     const isPublished = isHostMode || games.some(g => g.id === currentGame.id)
     const autosaveLabel = saving
       ? '● Saving…'
@@ -570,12 +680,122 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
           <button style={s.modeToggle} onClick={toggleDashMode} title="Toggle light/dark mode">{dashMode === 'dark' ? '☀️' : '🌙'}</button>
         </div>
         <div style={s.tabs}>
-          {['questions', 'customize', 'preview'].map(t => (
-            <button key={t} style={{ ...s.tab, ...(activeTab === t ? s.tabOn : {}) }} onClick={() => setActiveTab(t)}>{t.toUpperCase()}</button>
-          ))}
+          {(isBride ? ['survey', 'questions', 'customize', 'preview'] : ['questions', 'customize', 'preview']).map(t => {
+            const label = t === 'survey' ? 'SURVEY' : (t === 'questions' && isBride) ? 'BUILD TRIVIA' : t.toUpperCase()
+            return <button key={t} style={{ ...s.tab, ...(activeTab === t ? s.tabOn : {}) }} onClick={() => setActiveTab(t)}>{label}</button>
+          })}
         </div>
 
-        {activeTab === 'questions' && (
+        {isBride && activeTab === 'survey' && (
+          <>
+            <div style={{ marginBottom: 20 }}>
+              <label style={s.label}>GAME TITLE</label>
+              <input style={s.input} placeholder="e.g. Sarah's Bridal Shower 💍" value={gameTitle} onChange={e => setGameTitle(e.target.value)} />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={s.label}>BRIDE'S NAME</label>
+              <input style={s.input} placeholder="e.g. Sarah" value={currentGame.brideName || ''} onChange={e => setCurrentGame(g => ({ ...g, brideName: e.target.value }))} />
+            </div>
+
+            <div style={{ ...s.shareBox, borderColor: withAlpha(c.success, 0.3) }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 6 }}>💌 STEP 1 — SEND THE BRIDE HER SURVEY</div>
+              <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10, lineHeight: 1.5 }}>Tweak the questions below first if you like, then send this private link to the bride. She fills in her real answers — the guesses come later.</div>
+              {currentGame.surveyKey && <div style={{ fontSize: 11, color: c.textMuted, wordBreak: 'break-all', marginBottom: 10, lineHeight: 1.5 }}>{getSurveyLink(currentGame)}</div>}
+              <button style={{ ...s.copyBtn, background: c.success, color: c.successText }} onClick={copySurveyLink}>{surveyCopied ? '✓ Copied!' : 'Copy Bride Survey Link'}</button>
+            </div>
+
+            <div style={{ ...s.shareBox, borderColor: withAlpha(surveyStatus.submitted ? c.success : c.accent, 0.3) }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: surveyStatus.submitted ? c.success : c.accent, marginBottom: 6 }}>📥 STEP 2 — HER ANSWERS</div>
+              {surveyStatus.submitted ? (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: c.success, marginBottom: 6 }}>✓ {currentGame.brideName || 'The bride'} submitted her answers!</div>
+                  <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 12 }}>{surveyStatus.count} of {currentGame.questions.length} answered. Pull them in to build the trivia — you'll add the wrong-answer choices.</div>
+                  <button style={{ ...s.bigBtn, background: c.success, color: c.successText, opacity: pullingAnswers ? 0.6 : 1 }} disabled={pullingAnswers} onClick={pullBrideAnswers}>{pullingAnswers ? 'Loading…' : '→ Build the Trivia'}</button>
+                </>
+              ) : (
+                <div style={{ fontSize: 13, color: c.textMuted }}>
+                  ⏳ Awaiting the bride…{surveyStatus.count > 0 && <span style={{ color: c.accent }}> ({surveyStatus.count} answered so far)</span>}
+                  <div style={{ fontSize: 11, color: c.textFaint, marginTop: 6 }}>This updates automatically when she submits — leave this open or check back later.</div>
+                </div>
+              )}
+            </div>
+
+            <div style={s.section}>
+              <h2 style={s.sectionTitle}>SURVEY QUESTIONS ({currentGame.questions.length})</h2>
+              <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 16, lineHeight: 1.5 }}>These are what the bride answers. Reword, remove, or add your own. Rounds group them for her.</div>
+              {currentGame.questions.map((q, i) => (
+                <div key={q.id} style={s.qRow}>
+                  <div style={s.qNum}>{q.round ? q.round : `Q${i + 1}`}</div>
+                  <div style={{ flex: 1 }}>
+                    <textarea style={{ ...s.textarea, minHeight: 48, marginBottom: 0 }} value={q.post} onChange={e => updateBridePrompt(q.id, e.target.value)} />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <button style={{ ...s.arrowBtn, opacity: i === 0 ? 0.25 : 1 }} disabled={i === 0} onClick={() => moveQuestion(i, -1)} title="Move up">▲</button>
+                    <button style={{ ...s.arrowBtn, opacity: i === currentGame.questions.length - 1 ? 0.25 : 1 }} disabled={i === currentGame.questions.length - 1} onClick={() => moveQuestion(i, 1)} title="Move down">▼</button>
+                  </div>
+                  <button style={s.x} onClick={() => removeQuestion(q.id)}>✕</button>
+                </div>
+              ))}
+              <button style={{ ...s.editBtn, marginTop: 6 }} onClick={addBridePrompt}>＋ Add a question</button>
+            </div>
+            <button style={{ ...s.bigBtn, opacity: (!gameTitle.trim()) ? 0.4 : 1, marginTop: 24 }} onClick={goToManage} disabled={!gameTitle.trim()}>Go to Share &amp; Manage →</button>
+          </>
+        )}
+
+        {activeTab === 'questions' && isBride && (
+          <>
+            <div style={s.section}>
+              <h2 style={s.sectionTitle}>BUILD THE TRIVIA</h2>
+              <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 16, lineHeight: 1.55 }}>
+                Each question shows the bride's real answer (the ✓ correct one). Add a few believable <strong>wrong</strong> answers so guests have to actually guess. 2+ total choices needed per question to play.
+              </div>
+              {!surveyStatus.submitted && currentGame.questions.every(q => !q.brideAnswer) && (
+                <div style={{ fontSize: 12, color: c.accent, background: withAlpha(c.accent, 0.07), border: `1px solid ${withAlpha(c.accent, 0.2)}`, borderRadius: 6, padding: '12px 14px', marginBottom: 16 }}>
+                  The bride hasn't submitted yet. Send her the survey link from the <strong>Survey</strong> tab first — her answers land here automatically.
+                </div>
+              )}
+              {currentGame.questions.map((q, i) => {
+                const decoys = (q.choices || []).slice(1)
+                const totalChoices = (q.choices || []).filter(ch => ch && ch.trim()).length
+                return (
+                  <div key={q.id} style={{ ...s.qRow, flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                      <div style={s.qNum}>Q{i + 1}</div>
+                      <div style={{ flex: 1, fontSize: 13, color: c.textDim, fontWeight: 600 }}>{q.post}</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <button style={{ ...s.arrowBtn, opacity: i === 0 ? 0.25 : 1 }} disabled={i === 0} onClick={() => moveQuestion(i, -1)} title="Move up">▲</button>
+                        <button style={{ ...s.arrowBtn, opacity: i === currentGame.questions.length - 1 ? 0.25 : 1 }} disabled={i === currentGame.questions.length - 1} onClick={() => moveQuestion(i, 1)} title="Move down">▼</button>
+                      </div>
+                      <button style={s.x} onClick={() => removeQuestion(q.id)}>✕</button>
+                    </div>
+                    {q.brideAnswer ? (
+                      <>
+                        <div style={{ fontSize: 12, color: c.success, fontWeight: 700, padding: '8px 12px', background: withAlpha(c.success, 0.1), border: `1px solid ${withAlpha(c.success, 0.3)}`, borderRadius: 6 }}>✓ {q.brideAnswer} <span style={{ color: c.textFaint, fontWeight: 400 }}>· the bride's answer</span></div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          {[0, 1, 2].map(di => (
+                            <input key={di} style={s.input} placeholder={`Wrong answer ${di + 1}`} value={decoys[di] || ''} onChange={e => updateBrideDecoy(q.id, di, e.target.value)} />
+                          ))}
+                        </div>
+                        {totalChoices < 2 && <div style={{ fontSize: 11, color: c.danger }}>⚠ Add at least one wrong answer.</div>}
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 12, color: c.textFaint, fontStyle: 'italic' }}>Waiting on the bride's answer for this one.</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            {saveError && <div style={{ color: c.danger, fontSize: 12, marginTop: 12 }}>{saveError}</div>}
+            <div style={{ fontSize: 11, color: c.textFaint, textAlign: 'center', marginTop: 20, marginBottom: 8 }}>Your changes save automatically as you go.</div>
+            <button
+              style={{ ...s.bigBtn, opacity: (!gameTitle.trim() || currentGame.questions.length === 0) ? 0.4 : 1 }}
+              onClick={goToManage}
+              disabled={!gameTitle.trim() || currentGame.questions.length === 0}
+            >{isPublished ? 'Go to Share & Manage →' : 'Save & Get Share Link →'}</button>
+          </>
+        )}
+
+        {activeTab === 'questions' && !isBride && (
           <>
             <div style={{ marginBottom: 20 }}>
               <label style={s.label}>GAME TITLE</label>
@@ -810,8 +1030,9 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
 
   // ── MANAGE ────────────────────────────────────────────────────────────────
   if (screen === 'manage' && currentGame) {
+    const isBride = currentGame.edition === 'bride'
     const scores = computeScores()
-    const personStats = computePersonStats(currentGame)
+    const personStats = isBride ? [] : computePersonStats(currentGame)
     const maxCorrect = Math.max(1, ...personStats.map(([, st]) => st.correct))
     const maxFeatured = Math.max(1, ...personStats.map(([, st]) => st.featured))
     const qIdx = currentGame.currentQuestion
@@ -854,6 +1075,20 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               </div>
             )}
           </div>
+          {isBride && (
+            <div style={{ ...s.shareBox, borderColor: withAlpha(surveyStatus.submitted ? c.success : c.accent, 0.3) }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: surveyStatus.submitted ? c.success : c.accent, marginBottom: 6 }}>💌 BRIDE SURVEY</div>
+              {surveyStatus.submitted ? (
+                <div style={{ fontSize: 13, color: c.success, fontWeight: 700, marginBottom: 10 }}>✓ {currentGame.brideName || 'The bride'} submitted her answers ({surveyStatus.count}/{currentGame.questions.length})</div>
+              ) : (
+                <div style={{ fontSize: 13, color: c.textMuted, marginBottom: 10 }}>⏳ Awaiting the bride…{surveyStatus.count > 0 && ` (${surveyStatus.count} answered)`}</div>
+              )}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button style={s.copyBtn} onClick={copySurveyLink}>{surveyCopied ? '✓ Copied!' : 'Copy Bride Survey Link'}</button>
+                {surveyStatus.submitted && <button style={{ ...s.copyBtn, background: c.success, color: c.successText, opacity: pullingAnswers ? 0.6 : 1 }} disabled={pullingAnswers} onClick={pullBrideAnswers}>{pullingAnswers ? 'Loading…' : '↻ Pull in her answers'}</button>}
+              </div>
+            </div>
+          )}
           <div style={{ ...s.shareBox, borderColor: withAlpha(c.success, 0.3) }}>
             <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 6 }}>📺 BIG SCREEN — CAST TO A TV</div>
             <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10, lineHeight: 1.5 }}>A shared view for the room: the question, live "locked in" counter, the reveal, and the leaderboard. Open it on a laptop plugged into a TV, or cast the browser tab. It follows along automatically — no clicking needed.</div>
@@ -862,8 +1097,9 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               <button style={{ ...s.copyBtn, background: 'none', color: c.success, border: `1px solid ${withAlpha(c.success, 0.4)}` }} onClick={() => copyScreenLink(currentGame.id)}>{screenCopied ? '✓ Copied!' : 'Copy Link'}</button>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-            <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('questions'); setScreen('create') }}>✎ Edit Questions</button>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+            {isBride && <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('survey'); setScreen('create') }}>💌 Survey</button>}
+            <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('questions'); setScreen('create') }}>✎ {isBride ? 'Build Trivia' : 'Edit Questions'}</button>
             <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('customize'); setScreen('create') }}>🎨 Customize Theme</button>
           </div>
           <button style={{ ...s.bigBtn, marginBottom: 20 }} onClick={() => startMockPreview('manage')}>🎮 Play as a Guest (Preview)</button>
