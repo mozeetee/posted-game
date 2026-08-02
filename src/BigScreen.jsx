@@ -168,7 +168,7 @@ export default function BigScreen({ gameId }) {
             <div style={s.postText}>{q.post}</div>
           </div>
           <div style={s.choiceGrid}>
-            {q.choices.map(choice => {
+            {q.choices.filter(c => c && c.trim()).map(choice => {
               const isAnswer = choice === q.author
               const highlight = revealed && isAnswer
               return (

@@ -363,7 +363,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
           </div>
           <div style={p.whoLabel}>{q.questionLabel?.trim() || theme.questionLabel}</div>
           <div style={p.choiceGrid}>
-            {q.choices.map(choice => {
+            {q.choices.filter(c => c && c.trim()).map(choice => {
               let bg = theme.cardColor, border = withAlpha(theme.textColor, 0.18), color = theme.textColor
               if (submitted) {
                 if (choice === q.author && revealed) { bg = withAlpha(theme.secondaryColor, 0.13); border = theme.secondaryColor; color = theme.secondaryColor }

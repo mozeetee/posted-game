@@ -197,7 +197,9 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     setCurrentGame(g => {
       let changed = false
       const questions = g.questions.map(q => {
-        if ((q.choices || []).length >= 4) return q
+        // Only seed slots for brand-new/empty questions. Once the host has any
+        // answers, leave the count alone so trimming to 2–3 options sticks.
+        if ((q.choices || []).length >= 1) return q
         changed = true
         return { ...q, choices: padChoices(q.choices) }
       })
@@ -837,7 +839,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
             <div style={s.section}>
               <h2 style={s.sectionTitle}>BUILD THE TRIVIA</h2>
               <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 16, lineHeight: 1.55 }}>
-                Mark the correct answer with the ○ button, then fill in believable <strong>wrong</strong> answers. Edit any answer's wording (e.g. change "I" to "her"), drag the order with ▲▼ or tap <strong>Shuffle</strong> so the right answer isn't always first. Filling it out together with the bride in person? Just type her answers here.
+                Mark the correct answer with the ○ button, then fill in believable <strong>wrong</strong> answers. Edit any answer's wording (e.g. change "I" to "her"), drag the order with ▲▼ or tap <strong>Shuffle</strong> so the right answer isn't always first. Only need 2 or 3 options? Just leave the extra answers blank or remove them with ✕. Filling it out together with the bride in person? Just type her answers here.
               </div>
               {!surveyStatus.submitted && currentGame.questions.every(q => !q.brideAnswer) && (
                 <div style={{ fontSize: 12, color: c.accent, background: withAlpha(c.accent, 0.07), border: `1px solid ${withAlpha(c.accent, 0.2)}`, borderRadius: 6, padding: '12px 14px', marginBottom: 16 }}>
@@ -1113,7 +1115,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                 <div style={s.prevPost}>"{q.post}"</div>
                 <div style={{ textAlign: 'center', fontSize: 10, letterSpacing: 2, color: c.textFaint, marginBottom: 10 }}>{theme.questionLabel}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
-                  {q.choices.map(choice => (
+                  {q.choices.filter(c => c && c.trim()).map(choice => (
                     <div key={choice} style={{ padding: '10px 14px', borderRadius: 4, fontSize: 13, textAlign: 'center', fontWeight: 700, background: choice === q.author ? withAlpha(c.success, 0.13) : c.cardAlt, color: choice === q.author ? c.success : c.textMuted, border: `1px solid ${choice === q.author ? withAlpha(c.success, 0.27) : c.borderSoft}` }}>
                       {choice === q.author ? '✓ ' : ''}{choice}
                     </div>
