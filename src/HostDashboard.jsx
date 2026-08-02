@@ -13,6 +13,22 @@ function resizeChoices(arr, n) {
   return next
 }
 
+// Ensure a bride question has at least 4 answer slots to fill in.
+function padChoices(arr) {
+  const c = [...(arr || [])]
+  while (c.length < 4) c.push('')
+  return c
+}
+
+function shuffleArr(arr) {
+  const c = [...arr]
+  for (let i = c.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[c[i], c[j]] = [c[j], c[i]]
+  }
+  return c
+}
+
 function generateGameId() {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
 }
@@ -172,6 +188,22 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     const poll = setInterval(tick, 3000)
     return () => { stopped = true; clearInterval(poll) }
   }, [screen, currentGame?.id, currentGame?.edition])
+
+  // When the host opens the bride "Build Trivia" tab, make sure every question
+  // has at least 4 answer slots so they're ready to fill in (esp. when filling
+  // it out in person without the survey).
+  useEffect(() => {
+    if (screen !== 'create' || activeTab !== 'questions' || currentGame?.edition !== 'bride') return
+    setCurrentGame(g => {
+      let changed = false
+      const questions = g.questions.map(q => {
+        if ((q.choices || []).length >= 4) return q
+        changed = true
+        return { ...q, choices: padChoices(q.choices) }
+      })
+      return changed ? { ...g, questions } : g
+    })
+  }, [screen, activeTab, currentGame?.edition])
 
   // Home list needs titles and counts, not every game's full blob with all
   // its images — the list_games() function returns just those few columns.
@@ -488,17 +520,18 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     let questions = currentGame.questions.map(q => {
       const row = byId[String(q.id)]
       if (!row) return q
-      if (row.passed) return { ...q, passedByBride: true, brideAnswer: '', author: '', choices: [] }
-      if (!row.answer) return { ...q, passedByBride: false }
-      // Seed the correct answer + keep any decoys the host already added.
-      const existingDecoys = (q.choices || []).filter(c => c && c !== row.answer && c !== q.brideAnswer)
-      return { ...q, passedByBride: false, brideAnswer: row.answer, author: row.answer, choices: [row.answer, ...existingDecoys] }
+      if (row.passed) return { ...q, passedByBride: true, brideAnswer: '', author: '', choices: padChoices([]) }
+      if (!row.answer) return { ...q, passedByBride: false, choices: padChoices(q.choices) }
+      // Seed the correct answer + keep any decoys the host already added, pad to
+      // 4 slots, and shuffle so the right answer isn't always in the same spot.
+      const existingDecoys = (q.choices || []).filter(c => c && c !== row.answer && c !== q.brideAnswer && c !== q.author)
+      return { ...q, passedByBride: false, brideAnswer: row.answer, author: row.answer, choices: shuffleArr(padChoices([row.answer, ...existingDecoys])) }
     })
     // Append her own suggested questions (idempotent: track their survey id).
     const seen = new Set(questions.map(q => q.brideSurveyId).filter(Boolean))
     brideAdded.forEach((a, i) => {
       if (seen.has(a.id)) return
-      questions.push({ id: Date.now() + i, brideSurveyId: a.id, round: "Bride's Picks", post: a.prompt, brideAnswer: a.answer, author: a.answer, choices: a.answer ? [a.answer] : [], questionImage: null, revealImage: null })
+      questions.push({ id: Date.now() + i, brideSurveyId: a.id, round: "Bride's Picks", post: a.prompt, brideAnswer: a.answer, author: a.answer, choices: shuffleArr(padChoices(a.answer ? [a.answer] : [])), questionImage: null, revealImage: null })
     })
     const updated = { ...currentGame, questions, surveyStatus: 'ready' }
     setCurrentGame(updated)
@@ -507,31 +540,59 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     setActiveTab('questions')
   }
 
-  // Update one decoy (wrong answer) for a bride question. The bride's answer is
-  // always choices[0]; decoys fill the rest.
-  function updateBrideDecoy(qId, decoyIdx, val) {
-    setCurrentGame(g => ({
-      ...g,
-      questions: g.questions.map(q => {
-        if (q.id !== qId) return q
-        const decoys = (q.choices || []).slice(1)
-        decoys[decoyIdx] = val
-        return { ...q, choices: [q.brideAnswer || q.author || q.choices?.[0] || '', ...decoys] }
-      }),
-    }))
+  // ── Bride "Build Trivia" answer editing ──
+  // Answers live in `choices` (display order). `author` is the correct answer's
+  // text. Editing the correct answer's text keeps `author` in sync, so the host
+  // can fix wording ("I" → "her") and the game still scores it correctly.
+  function mapQ(qId, fn) {
+    setCurrentGame(g => ({ ...g, questions: g.questions.map(q => (q.id === qId ? fn(q) : q)) }))
   }
 
-  // Let the host type the correct answer themselves for a question the bride
-  // passed on or left blank (becomes choices[0] + the scored answer).
-  function updateBrideCorrect(qId, val) {
-    setCurrentGame(g => ({
-      ...g,
-      questions: g.questions.map(q => {
-        if (q.id !== qId) return q
-        const decoys = (q.choices || []).slice(1)
-        return { ...q, author: val, choices: [val, ...decoys] }
-      }),
-    }))
+  function updateBrideChoiceText(qId, idx, val) {
+    mapQ(qId, q => {
+      const choices = padChoices(q.choices)
+      const wasCorrect = choices[idx] !== '' && choices[idx] === q.author
+      choices[idx] = val
+      return { ...q, choices, author: wasCorrect ? val : q.author, passedByBride: false }
+    })
+  }
+
+  // Mark which answer is the correct one (independent of its position).
+  function setBrideCorrect(qId, idx) {
+    mapQ(qId, q => ({ ...q, author: padChoices(q.choices)[idx] || '' }))
+  }
+
+  function moveBrideChoice(qId, idx, dir) {
+    mapQ(qId, q => {
+      const c = padChoices(q.choices)
+      const j = idx + dir
+      if (j < 0 || j >= c.length) return q
+      ;[c[idx], c[j]] = [c[j], c[idx]]
+      return { ...q, choices: c }
+    })
+  }
+
+  function shuffleBrideChoices(qId) {
+    mapQ(qId, q => ({ ...q, choices: shuffleArr(padChoices(q.choices)) }))
+  }
+
+  function addBrideChoice(qId) {
+    mapQ(qId, q => (padChoices(q.choices).length >= 6 ? q : { ...q, choices: [...padChoices(q.choices), ''] }))
+  }
+
+  function removeBrideChoice(qId, idx) {
+    mapQ(qId, q => {
+      const c = padChoices(q.choices)
+      if (c.length <= 2) return q
+      const removed = c[idx]
+      c.splice(idx, 1)
+      return { ...q, choices: c, author: removed === q.author ? '' : q.author }
+    })
+  }
+
+  // Add a brand-new, fully host-authored question (prompt + 4 blank answers).
+  function addBrideBuiltQuestion() {
+    setCurrentGame(g => ({ ...g, questions: [...g.questions, { id: Date.now(), round: '', post: '', author: '', choices: ['', '', '', ''], questionImage: null, revealImage: null }] }))
   }
 
   // Edit a bride question's prompt text (before the survey is sent).
@@ -776,63 +837,59 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
             <div style={s.section}>
               <h2 style={s.sectionTitle}>BUILD THE TRIVIA</h2>
               <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 16, lineHeight: 1.55 }}>
-                Each question shows the bride's real answer (the ✓ correct one). Add a few believable <strong>wrong</strong> answers so guests have to actually guess. 2+ total choices needed per question to play.
+                Mark the correct answer with the ○ button, then fill in believable <strong>wrong</strong> answers. Edit any answer's wording (e.g. change "I" to "her"), drag the order with ▲▼ or tap <strong>Shuffle</strong> so the right answer isn't always first. Filling it out together with the bride in person? Just type her answers here.
               </div>
               {!surveyStatus.submitted && currentGame.questions.every(q => !q.brideAnswer) && (
                 <div style={{ fontSize: 12, color: c.accent, background: withAlpha(c.accent, 0.07), border: `1px solid ${withAlpha(c.accent, 0.2)}`, borderRadius: 6, padding: '12px 14px', marginBottom: 16 }}>
-                  The bride hasn't submitted yet. Send her the survey link from the <strong>Survey</strong> tab first — her answers land here automatically.
+                  The bride hasn't submitted her survey yet — but you can fill her answers in right here (great for doing it together in person), or send her the link from the <strong>Survey</strong> tab.
                 </div>
               )}
               {currentGame.questions.map((q, i) => {
-                const decoys = (q.choices || []).slice(1)
-                const totalChoices = (q.choices || []).filter(ch => ch && ch.trim()).length
+                const choices = q.choices || []
+                const filled = choices.filter(ch => ch && ch.trim()).length
+                const correctSet = !!q.author && choices.some(ch => ch === q.author)
                 return (
                   <div key={q.id} style={{ ...s.qRow, flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                       <div style={s.qNum}>Q{i + 1}</div>
-                      <div style={{ flex: 1, fontSize: 13, color: c.textDim, fontWeight: 600 }}>{q.post}</div>
+                      <textarea style={{ ...s.textarea, minHeight: 44, marginBottom: 0, flex: 1 }} value={q.post} placeholder="Type the question…" onChange={e => updateBridePrompt(q.id, e.target.value)} />
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <button style={{ ...s.arrowBtn, opacity: i === 0 ? 0.25 : 1 }} disabled={i === 0} onClick={() => moveQuestion(i, -1)} title="Move up">▲</button>
-                        <button style={{ ...s.arrowBtn, opacity: i === currentGame.questions.length - 1 ? 0.25 : 1 }} disabled={i === currentGame.questions.length - 1} onClick={() => moveQuestion(i, 1)} title="Move down">▼</button>
+                        <button style={{ ...s.arrowBtn, opacity: i === 0 ? 0.25 : 1 }} disabled={i === 0} onClick={() => moveQuestion(i, -1)} title="Move question up">▲</button>
+                        <button style={{ ...s.arrowBtn, opacity: i === currentGame.questions.length - 1 ? 0.25 : 1 }} disabled={i === currentGame.questions.length - 1} onClick={() => moveQuestion(i, 1)} title="Move question down">▼</button>
                       </div>
-                      <button style={s.x} onClick={() => removeQuestion(q.id)}>✕</button>
+                      <button style={s.x} onClick={() => removeQuestion(q.id)} title="Remove question">✕</button>
                     </div>
                     {q.brideSurveyId && <span style={{ ...chip(c.success), alignSelf: 'flex-start' }}>💡 the bride's own question</span>}
-                    {q.brideAnswer ? (
-                      <>
-                        <div style={{ fontSize: 12, color: c.success, fontWeight: 700, padding: '8px 12px', background: withAlpha(c.success, 0.1), border: `1px solid ${withAlpha(c.success, 0.3)}`, borderRadius: 6 }}>✓ {q.brideAnswer} <span style={{ color: c.textFaint, fontWeight: 400 }}>· the correct answer</span></div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                          {[0, 1, 2].map(di => (
-                            <input key={di} style={s.input} placeholder={`Wrong answer ${di + 1}`} value={decoys[di] || ''} onChange={e => updateBrideDecoy(q.id, di, e.target.value)} />
-                          ))}
+                    {q.passedByBride && !correctSet && <span style={{ ...chip(c.accent), alignSelf: 'flex-start' }}>⤼ she passed — fill it in or remove it</span>}
+
+                    {choices.map((ch, idx) => {
+                      const isCorrect = ch !== '' && ch === q.author
+                      return (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <label title="Mark as the correct answer" style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: isCorrect ? c.success : c.textFaint, fontSize: 10, fontWeight: 700, minWidth: 62, whiteSpace: 'nowrap' }}>
+                            <input type="radio" name={`correct-${q.id}`} checked={isCorrect} onChange={() => setBrideCorrect(q.id, idx)} style={{ accentColor: c.success, width: 16, height: 16 }} />
+                            {isCorrect ? '✓ correct' : ''}
+                          </label>
+                          <input style={{ ...s.input, borderColor: isCorrect ? withAlpha(c.success, 0.6) : c.border }} placeholder={`Answer ${idx + 1}`} value={ch} onChange={e => updateBrideChoiceText(q.id, idx, e.target.value)} />
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <button style={{ ...s.arrowBtn, opacity: idx === 0 ? 0.25 : 1 }} disabled={idx === 0} onClick={() => moveBrideChoice(q.id, idx, -1)} title="Move answer up">▲</button>
+                            <button style={{ ...s.arrowBtn, opacity: idx === choices.length - 1 ? 0.25 : 1 }} disabled={idx === choices.length - 1} onClick={() => moveBrideChoice(q.id, idx, 1)} title="Move answer down">▼</button>
+                          </div>
+                          <button style={{ ...s.x, opacity: choices.length <= 2 ? 0.3 : 1 }} disabled={choices.length <= 2} onClick={() => removeBrideChoice(q.id, idx)} title="Remove answer">✕</button>
                         </div>
-                        {totalChoices < 2 && <div style={{ fontSize: 11, color: c.danger }}>⚠ Add at least one wrong answer.</div>}
-                      </>
-                    ) : (
-                      <>
-                        <div style={{ fontSize: 12, color: q.passedByBride ? c.accent : c.textFaint, fontStyle: 'italic' }}>
-                          {q.passedByBride
-                            ? '⤼ The bride passed on this one. Fill in the answer to keep it, or remove it.'
-                            : q.brideSurveyId
-                            ? 'She suggested this but left the answer blank — add the correct answer to use it.'
-                            : 'No answer yet — fill it in yourself, or leave it for the bride.'}
-                        </div>
-                        <input style={s.input} placeholder="Correct answer" value={q.choices?.[0] || ''} onChange={e => updateBrideCorrect(q.id, e.target.value)} />
-                        {(q.choices?.[0] || '').trim() && (
-                          <>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                              {[0, 1, 2].map(di => (
-                                <input key={di} style={s.input} placeholder={`Wrong answer ${di + 1}`} value={decoys[di] || ''} onChange={e => updateBrideDecoy(q.id, di, e.target.value)} />
-                              ))}
-                            </div>
-                            {totalChoices < 2 && <div style={{ fontSize: 11, color: c.danger }}>⚠ Add at least one wrong answer.</div>}
-                          </>
-                        )}
-                      </>
-                    )}
+                      )
+                    })}
+
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {choices.length < 6 && <button style={s.ghost} onClick={() => addBrideChoice(q.id)}>＋ Add answer</button>}
+                      <button style={s.ghost} onClick={() => shuffleBrideChoices(q.id)}>🔀 Shuffle order</button>
+                    </div>
+                    {filled < 2 && <div style={{ fontSize: 11, color: c.danger }}>⚠ Add at least 2 answers.</div>}
+                    {filled >= 2 && !correctSet && <div style={{ fontSize: 11, color: c.danger }}>⚠ Tap ○ to mark the correct answer.</div>}
                   </div>
                 )
               })}
+              <button style={{ ...s.editBtn, marginTop: 6 }} onClick={addBrideBuiltQuestion}>＋ Add a question</button>
             </div>
             {saveError && <div style={{ color: c.danger, fontSize: 12, marginTop: 12 }}>{saveError}</div>}
             <div style={{ fontSize: 11, color: c.textFaint, textAlign: 'center', marginTop: 20, marginBottom: 8 }}>Your changes save automatically as you go.</div>
