@@ -1444,7 +1444,7 @@ const DASH_PALETTES = {
 function buildDashTheme(mode, edition) {
   const key = edition === 'bride' ? (mode === 'light' ? 'brideLight' : 'brideDark') : mode
   const c = DASH_PALETTES[key] || DASH_PALETTES.dark
-  const bodyFont = "'Poppins', sans-serif"
+  const bodyFont = "Arial, Helvetica, sans-serif"
   const s = {
     page: { minHeight: '100vh', background: c.bg, color: c.text, fontFamily: bodyFont, padding: '0 0 80px' },
     container: { maxWidth: 680, margin: '0 auto', padding: '24px 20px' },
