@@ -466,7 +466,9 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   }
 
   function getGameLink(gameId) {
-    return `${window.location.origin}/?game=${gameId}&role=player`
+    // Bride games add &ed=bride so the shared join link shows a bridal card.
+    const edition = currentGame?.edition === 'bride' ? '&ed=bride' : ''
+    return `${window.location.origin}/?game=${gameId}&role=player${edition}`
   }
 
   function getGuestLink(gameId) {

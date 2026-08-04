@@ -16,6 +16,15 @@
   status = 200
   force = true
 
+# Bride Edition PLAYER/join links carry ?ed=bride so guests see a bridal
+# "you're invited" card instead of the generic game one.
+[[redirects]]
+  from = "/*"
+  query = { role = "player", ed = "bride" }
+  to = "/bride-player.html"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

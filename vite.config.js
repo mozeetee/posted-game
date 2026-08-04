@@ -13,6 +13,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         bride: resolve(__dirname, 'bride.html'),
         brideHost: resolve(__dirname, 'bride-host.html'),
+        bridePlayer: resolve(__dirname, 'bride-player.html'),
       },
     },
   },
