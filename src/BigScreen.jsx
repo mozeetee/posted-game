@@ -82,7 +82,7 @@ export default function BigScreen({ gameId }) {
   function Background({ children }) {
     return (
       <div style={s.page}>
-        {theme.backgroundImage && <div style={{ position: 'absolute', inset: 0, backgroundImage: `url(${theme.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.3 }} />}
+        {theme.backgroundImage && <div style={{ position: 'absolute', inset: 0, backgroundImage: `url(${theme.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.5 }} />}
         <div style={s.inner}>{children}</div>
       </div>
     )

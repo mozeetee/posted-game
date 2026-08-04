@@ -1380,7 +1380,7 @@ function ThemePreview({ theme, title }) {
   return (
     <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', border: `1px solid ${withAlpha(theme.textColor, 0.15)}`, background: theme.backgroundColor, padding: '28px 22px', fontFamily: theme.bodyFont }}>
       {theme.backgroundImage && (
-        <div style={{ position: 'absolute', inset: 0, backgroundImage: `url(${theme.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.35 }} />
+        <div style={{ position: 'absolute', inset: 0, backgroundImage: `url(${theme.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.5 }} />
       )}
       <div style={{ position: 'relative' }}>
         {theme.logoImage ? (
