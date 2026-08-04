@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         bride: resolve(__dirname, 'bride.html'),
+        brideHost: resolve(__dirname, 'bride-host.html'),
       },
     },
   },

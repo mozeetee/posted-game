@@ -483,7 +483,9 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   }
 
   function getHostLink(game) {
-    return `${window.location.origin}/?game=${game.id}&role=host&key=${game.hostKey || ''}`
+    // Bride games add &ed=bride so the shared link preview shows a bridal card.
+    const edition = game.edition === 'bride' ? '&ed=bride' : ''
+    return `${window.location.origin}/?game=${game.id}&role=host&key=${game.hostKey || ''}${edition}`
   }
 
   function getScreenLink(gameId) {

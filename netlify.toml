@@ -7,6 +7,15 @@
   status = 200
   force = true
 
+# Bride Edition HOST links carry ?ed=bride so their preview is a bridal
+# "you're the host" card instead of the generic game one.
+[[redirects]]
+  from = "/*"
+  query = { role = "host", ed = "bride" }
+  to = "/bride-host.html"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
