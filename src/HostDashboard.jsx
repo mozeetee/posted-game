@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import { ImageUploadSlot } from './ImageUpload'
 import { compressImage, readFileAsDataUrl } from './ImageUpload'
-import { DEFAULT_THEME, THEME_PRESETS, FONT_OPTIONS, getTheme, ensureGoogleFont, withAlpha, contrastColor, BRAND_NAME, BRAND_TAGLINE, EDITIONS, getEditionConfig } from './theme'
+import { DEFAULT_THEME, THEME_PRESETS, FONT_OPTIONS, getTheme, ensureGoogleFont, withAlpha, contrastColor, BRAND_NAME, BRAND_TAGLINE, EDITIONS, getEditionConfig, getBrandParts } from './theme'
 import PlayerRoom from './PlayerRoom'
+import { Avatar } from './Avatar'
 
 const DASH_MODE_KEY = 'wpt_dash_mode'
 
@@ -70,12 +71,13 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState(null)
   const [mockReturnScreen, setMockReturnScreen] = useState('manage')
-  const [dashMode, setDashMode] = useState(() => localStorage.getItem(DASH_MODE_KEY) || 'dark')
+  const [dashMode, setDashMode] = useState(() => localStorage.getItem(DASH_MODE_KEY) || 'light')
   // Live gameplay state from the round_state() SQL function: players, totals,
   // and current-round answers in one ~1KB response — the manage screen never
   // re-downloads the game blob or the full answers list while running.
   const [liveAnswers, setLiveAnswers] = useState({})
   const [livePlayers, setLivePlayers] = useState([])
+  const [liveAvatars, setLiveAvatars] = useState({}) // player_name -> avatar id
   const [liveTotals, setLiveTotals] = useState([])
   const [answersExist, setAnswersExist] = useState(false)
   // True while a start/next/finish request is in flight, so the button can't
@@ -99,7 +101,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     })
   }
 
-  useEffect(() => { ensureGoogleFont("'Poppins', sans-serif") }, [])
+  useEffect(() => {
+    ensureGoogleFont("'Fredoka', sans-serif")
+    ensureGoogleFont("'Nunito Sans', sans-serif")
+    ensureGoogleFont("'Poppins', sans-serif")
+  }, [])
 
   useEffect(() => { if (unlocked) loadGames() }, [unlocked])
 
@@ -142,11 +148,13 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     const qIdx = currentGame.currentQuestion
     let stopped = false
     async function tick() {
-      const [rs, st] = await Promise.all([
+      const [rs, st, av] = await Promise.all([
         supabase.rpc('round_state', { gid: gameId, qidx: qIdx }),
         supabase.from('games').select('status:data->>status,current_question:data->currentQuestion').eq('game_id', gameId).single(),
+        supabase.from('game_players').select('player_name,avatar').eq('game_id', gameId),
       ])
       if (stopped) return
+      if (!av.error && av.data) setLiveAvatars(Object.fromEntries(av.data.map(r => [r.player_name, r.avatar || null])))
       if (rs.data) {
         setLivePlayers(rs.data.map(r => ({ name: r.player_name })))
         setLiveTotals(rs.data.map(r => [r.player_name, r.total]))
@@ -721,8 +729,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     <div style={s.page}>
       <div style={{ ...s.container, maxWidth: 380, textAlign: 'center', paddingTop: 60, position: 'relative' }}>
         <button style={s.modeToggle} onClick={toggleDashMode} title="Toggle light/dark mode">{dashMode === 'dark' ? '☀️' : '🌙'}</button>
-        <img src="/logo.svg" alt={BRAND_NAME} style={{ ...s.logoImg, marginTop: 40 }} />
-        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Admin Access</div>
+        <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 34, color: c.text, marginTop: 40, marginBottom: 18, lineHeight: 1 }}>{getBrandParts().lead} <span style={{ color: c.accent }}>{getBrandParts().accent}</span></div>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, fontFamily: "'Fredoka', sans-serif" }}>Admin access</div>
         <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 28, letterSpacing: 1 }}>Enter the admin password to manage games.</div>
         <input
           type="password"
@@ -764,7 +772,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
       <div style={s.container}>
         <header style={s.header}>
           <button style={s.modeToggle} onClick={toggleDashMode} title="Toggle light/dark mode">{dashMode === 'dark' ? '☀️' : '🌙'}</button>
-          <img src="/logo.svg" alt={BRAND_NAME} style={{ ...s.logoImg, margin: '0 auto 16px' }} />
+          <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 42, color: c.text, margin: '4px auto 6px', lineHeight: 1 }}>{getBrandParts().lead} <span style={{ color: c.accent }}>{getBrandParts().accent}</span></div>
           <p style={s.tagline}>{BRAND_TAGLINE}</p>
         </header>
         {!showEditionPicker ? (
@@ -774,7 +782,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
             <h2 style={{ ...s.sectionTitle, marginBottom: 12 }}>CHOOSE AN EDITION</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {Object.values(EDITIONS).map(ed => (
-                <button key={ed.id} style={{ display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 8, padding: '14px 16px', cursor: 'pointer', color: c.text, fontFamily: "'Poppins', sans-serif" }} onClick={() => startNewGame(ed.id)}>
+                <button key={ed.id} style={{ display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 14, padding: '14px 16px', cursor: 'pointer', color: c.text, fontFamily: "'Nunito Sans', sans-serif" }} onClick={() => startNewGame(ed.id)}>
                   <span style={{ fontSize: 26 }}>{ed.emoji}</span>
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                     <span style={{ fontWeight: 800, fontSize: 15 }}>{ed.label}</span>
@@ -1384,7 +1392,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
           {livePlayers.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
               {livePlayers.map(p => (
-                <div key={p.name} style={{ padding: '6px 14px', border: `1px solid ${answeredPlayers.has(p.name) ? c.success : c.border}`, borderRadius: 20, fontSize: 12, color: c.textDim, transition: 'border-color 0.3s' }}>
+                <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 13px 5px 5px', border: `1px solid ${answeredPlayers.has(p.name) ? c.success : c.border}`, borderRadius: 22, fontSize: 12.5, fontWeight: 700, color: c.textDim, transition: 'border-color 0.3s' }}>
+                  <Avatar id={liveAvatars[p.name]} fallback={p.name} size={22} />
                   {p.name}{answeredPlayers.has(p.name) && <span style={{ color: c.success }}> ✓</span>}
                 </div>
               ))}
@@ -1413,14 +1422,14 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                     {livePlayers.filter(pl => answeredPlayers.has(pl.name)).map(pl => {
                       const correct = liveAnswers[`${pl.name}:::${qIdx}`] === q.author
                       return (
-                        <span key={pl.name} style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, border: `1px solid ${correct ? withAlpha(c.success, 0.53) : withAlpha(c.danger, 0.53)}`, background: correct ? withAlpha(c.success, 0.08) : withAlpha(c.danger, 0.08), color: c.textDim }}>
-                          {correct ? '✅' : '❌'} {pl.name}
+                        <span key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px 4px 4px', borderRadius: 20, fontSize: 12, fontWeight: 700, border: `1px solid ${correct ? withAlpha(c.success, 0.53) : withAlpha(c.danger, 0.53)}`, background: correct ? withAlpha(c.success, 0.08) : withAlpha(c.danger, 0.08), color: c.textDim }}>
+                          <Avatar id={liveAvatars[pl.name]} fallback={pl.name} size={20} /> {correct ? '✅' : '❌'} {pl.name}
                         </span>
                       )
                     })}
                     {livePlayers.filter(pl => !answeredPlayers.has(pl.name)).map(pl => (
-                      <span key={pl.name} style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, border: `1px dashed ${c.border}`, color: c.textFaint }}>
-                        ⏳ {pl.name}
+                      <span key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px 4px 4px', borderRadius: 20, fontSize: 12, fontWeight: 700, border: `1px dashed ${c.border}`, color: c.textFaint }}>
+                        <Avatar id={liveAvatars[pl.name]} fallback={pl.name} size={20} /> ⏳ {pl.name}
                       </span>
                     ))}
                   </div>
@@ -1468,8 +1477,9 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
             <div style={s.section}>
               <h2 style={s.sectionTitle}>LIVE SCOREBOARD</h2>
               {scores.map(([name, score], i) => (
-                <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <div style={{ width: 28, fontSize: 16, textAlign: 'center' }}>{['🏆','🥈','🥉'][i] || `#${i+1}`}</div>
+                <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 12 }}>
+                  <div style={{ width: 26, fontSize: 16, textAlign: 'center' }}>{['🏆','🥈','🥉'][i] || `#${i+1}`}</div>
+                  <Avatar id={liveAvatars[name]} fallback={name} size={30} />
                   <div style={{ flex: 1, fontSize: 14, fontWeight: 700 }}>{name}</div>
                   <div style={{ fontSize: 13, color: c.accent, minWidth: 50, textAlign: 'right' }}>{score} pt{score !== 1 ? 's' : ''}</div>
                   <div style={{ width: 80, height: 4, background: c.borderSoft, borderRadius: 2, overflow: 'hidden' }}>
@@ -1541,36 +1551,39 @@ function ThemePreview({ theme, title }) {
   )
 }
 
+// Boutique "Field Notes" chrome for the host/admin dashboard — warm oat paper
+// with a sage lead (posted) or plum (bride), and a warm cozy dark for hosts who
+// prefer it. Kept distinct from each game's own player-facing theme.
 const DASH_PALETTES = {
   dark: {
-    bg: '#0a0a12', card: '#111120', cardAlt: '#0d0d1a', border: '#222232', borderSoft: '#1e1e2e',
-    text: '#f0f0f0', textDim: '#dddddd', textMuted: '#aaaaaa', textFaint: '#666666', textGhost: '#3a3a48',
-    accent: '#ffd166', accentText: '#111111',
-    success: '#00ff88', successText: '#111111',
-    danger: '#ff6b6b',
+    bg: '#211d17', card: '#2b2519', cardAlt: '#241f15', border: '#3d3524', borderSoft: '#332c1e',
+    text: '#f2ead8', textDim: '#e0d7c2', textMuted: '#b7ad95', textFaint: '#8a8069', textGhost: '#4a4232',
+    accent: '#7d9d78', accentText: '#1a160f',
+    success: '#8bbf8a', successText: '#1a160f',
+    danger: '#e0876a',
   },
   light: {
-    bg: '#f5f5f9', card: '#ffffff', cardAlt: '#f1f1f7', border: '#e2e2ec', borderSoft: '#eceef4',
-    text: '#1a1a26', textDim: '#33333f', textMuted: '#62626f', textFaint: '#83839a', textGhost: '#c2c2cc',
-    accent: '#dd9f2e', accentText: '#111111',
-    success: '#0e9f63', successText: '#ffffff',
-    danger: '#d94854',
+    bg: '#ece4d2', card: '#fffdf7', cardAlt: '#f4ecdb', border: '#e0d6c0', borderSoft: '#ebe3d1',
+    text: '#332f27', textDim: '#4a4438', textMuted: '#6b6353', textFaint: '#938a76', textGhost: '#c9bfa9',
+    accent: '#4f6b50', accentText: '#fdf8ec',
+    success: '#5f8f6b', successText: '#ffffff',
+    danger: '#c0553a',
   },
-  // Bridal chrome (blush + gold on plum) so a Bride Edition game's dashboard
-  // reads clearly different from the 'posted' game's gold + green.
+  // Bridal chrome (warm plum + rose) so a Bride Edition game's dashboard reads
+  // clearly different from the posted game's sage.
   brideDark: {
-    bg: '#160f1c', card: '#241830', cardAlt: '#1e1526', border: '#3a2b3f', borderSoft: '#2e2233',
-    text: '#f7ecf0', textDim: '#e8dbe2', textMuted: '#c4a9b6', textFaint: '#8a6f7d', textGhost: '#4a3a44',
-    accent: '#d8899b', accentText: '#1a1220',
-    success: '#c9a227', successText: '#1a1220',
-    danger: '#e07a8a',
+    bg: '#241820', card: '#31212b', cardAlt: '#2a1d25', border: '#43303b', borderSoft: '#392833',
+    text: '#f5e9ef', textDim: '#e6d5de', textMuted: '#c2a9b5', textFaint: '#8a6f7d', textGhost: '#4a3a44',
+    accent: '#c88aa0', accentText: '#241820',
+    success: '#8bbf8a', successText: '#241820',
+    danger: '#e0876a',
   },
   brideLight: {
-    bg: '#faf3f6', card: '#ffffff', cardAlt: '#f6eef2', border: '#ecdbe3', borderSoft: '#f2e6ec',
-    text: '#2a1a24', textDim: '#3d2a34', textMuted: '#6d5560', textFaint: '#9a8290', textGhost: '#cbb9c2',
-    accent: '#c25f7a', accentText: '#ffffff',
-    success: '#a5851d', successText: '#ffffff',
-    danger: '#c94f5f',
+    bg: '#f0e7dd', card: '#fffdf8', cardAlt: '#f6ece4', border: '#e6d8cc', borderSoft: '#f0e4da',
+    text: '#3a2e30', textDim: '#4d3a40', textMuted: '#6d5560', textFaint: '#9a8290', textGhost: '#cbb9c2',
+    accent: '#8f5a73', accentText: '#ffffff',
+    success: '#6f8f6a', successText: '#ffffff',
+    danger: '#c0553a',
   },
 }
 
@@ -1579,55 +1592,56 @@ const DASH_PALETTES = {
 // `c` (the raw palette) for one-off inline styling.
 function buildDashTheme(mode, edition) {
   const key = edition === 'bride' ? (mode === 'light' ? 'brideLight' : 'brideDark') : mode
-  const c = DASH_PALETTES[key] || DASH_PALETTES.dark
-  const bodyFont = "Arial, Helvetica, sans-serif"
+  const c = DASH_PALETTES[key] || DASH_PALETTES.light
+  const bodyFont = "'Nunito Sans', -apple-system, system-ui, sans-serif"
+  const headingFont = "'Fredoka', sans-serif"
   const s = {
     page: { minHeight: '100vh', background: c.bg, color: c.text, fontFamily: bodyFont, padding: '0 0 80px' },
     container: { maxWidth: 680, margin: '0 auto', padding: '24px 20px' },
     header: { textAlign: 'center', padding: '32px 0 32px', position: 'relative' },
-    logoImg: { width: 96, height: 96, borderRadius: 20, display: 'block' },
-    tagline: { color: c.textMuted, fontSize: 14, marginTop: 4, letterSpacing: 0.5 },
+    logoImg: { width: 96, height: 96, borderRadius: 24, display: 'block' },
+    tagline: { color: c.textMuted, fontSize: 14, marginTop: 4 },
     modeToggle: { position: 'absolute', top: 0, right: 0, background: c.card, border: `1px solid ${c.border}`, borderRadius: 20, width: 38, height: 38, cursor: 'pointer', fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-    bigBtn: { width: '100%', padding: '18px 24px', background: c.accent, color: c.accentText, border: 'none', borderRadius: 8, fontSize: 16, fontWeight: 800, cursor: 'pointer', letterSpacing: 0.3, fontFamily: bodyFont, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 },
-    section: { marginTop: 36 },
-    sectionTitle: { fontSize: 11, letterSpacing: 2, color: c.textFaint, marginBottom: 16, fontWeight: 700, textTransform: 'uppercase' },
-    gameCard: { background: c.card, border: `1px solid ${c.border}`, borderRadius: 10, padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-    gameCardTitle: { fontSize: 16, fontWeight: 700 },
-    badge: { padding: '2px 8px', borderRadius: 3, fontSize: 10, fontWeight: 700, letterSpacing: 1 },
+    bigBtn: { width: '100%', padding: '17px 24px', background: c.accent, color: c.accentText, border: 'none', borderRadius: 16, fontSize: 16, fontWeight: 600, cursor: 'pointer', fontFamily: headingFont, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, boxShadow: `0 8px 18px -12px ${withAlpha(c.accent, 0.9)}` },
+    section: { marginTop: 34 },
+    sectionTitle: { fontSize: 11, letterSpacing: '.16em', color: c.textMuted, marginBottom: 16, fontWeight: 800, textTransform: 'uppercase' },
+    gameCard: { background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+    gameCardTitle: { fontSize: 17, fontWeight: 600, fontFamily: headingFont },
+    badge: { padding: '3px 9px', borderRadius: 20, fontSize: 10, fontWeight: 800, letterSpacing: '.06em' },
     meta: { fontSize: 12, color: c.textFaint },
     ghost: { background: 'none', border: 'none', cursor: 'pointer', color: c.textMuted, fontSize: 13, fontFamily: bodyFont },
     topBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28, position: 'relative', gap: 10 },
-    back: { background: 'none', border: 'none', color: c.textMuted, cursor: 'pointer', fontSize: 14, fontFamily: bodyFont },
-    step: { fontSize: 11, letterSpacing: 2, color: c.textFaint },
+    back: { background: 'none', border: 'none', color: c.textMuted, cursor: 'pointer', fontSize: 14, fontFamily: bodyFont, fontWeight: 700 },
+    step: { fontSize: 11, letterSpacing: '.16em', color: c.textFaint, fontWeight: 700 },
     tabs: { display: 'flex', gap: 2, marginBottom: 28, borderBottom: `1px solid ${c.border}` },
-    tab: { background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', padding: '10px 20px', fontSize: 11, letterSpacing: 1, fontFamily: bodyFont, fontWeight: 600 },
+    tab: { background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', padding: '10px 20px', fontSize: 11, letterSpacing: '.08em', fontFamily: bodyFont, fontWeight: 700 },
     tabOn: { color: c.accent, borderBottom: `2px solid ${c.accent}` },
-    label: { display: 'block', fontSize: 10, letterSpacing: 1.5, color: c.textFaint, marginBottom: 8, fontWeight: 700 },
-    input: { width: '100%', background: c.card, border: `1px solid ${c.border}`, borderRadius: 6, color: c.text, padding: '12px 14px', fontSize: 14, fontFamily: bodyFont, boxSizing: 'border-box' },
-    textarea: { width: '100%', background: c.card, border: `1px solid ${c.border}`, borderRadius: 6, color: c.text, padding: '12px 14px', fontSize: 14, fontFamily: bodyFont, boxSizing: 'border-box', minHeight: 80, resize: 'vertical', marginBottom: 16 },
-    addBox: { background: c.card, border: `1px solid ${c.border}`, borderRadius: 10, padding: 20, marginTop: 24 },
-    addTitle: { fontSize: 11, letterSpacing: 2, color: c.accent, marginBottom: 16, fontWeight: 700 },
-    addBtn: { background: c.accent, color: c.accentText, border: 'none', borderRadius: 6, padding: '10px 20px', cursor: 'pointer', fontSize: 13, fontWeight: 800, letterSpacing: 0.3, fontFamily: bodyFont },
-    qRow: { background: c.card, border: `1px solid ${c.borderSoft}`, borderRadius: 8, padding: '14px 16px', display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 10 },
-    qNum: { color: c.accent, fontSize: 11, fontWeight: 700, minWidth: 24, paddingTop: 2 },
-    qText: { fontSize: 13, color: c.textDim, marginBottom: 4, fontStyle: 'italic' },
+    label: { display: 'block', fontSize: 10, letterSpacing: '.12em', color: c.textFaint, marginBottom: 8, fontWeight: 800, textTransform: 'uppercase' },
+    input: { width: '100%', background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, color: c.text, padding: '12px 14px', fontSize: 14, fontFamily: bodyFont, boxSizing: 'border-box' },
+    textarea: { width: '100%', background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, color: c.text, padding: '12px 14px', fontSize: 14, fontFamily: bodyFont, boxSizing: 'border-box', minHeight: 80, resize: 'vertical', marginBottom: 16 },
+    addBox: { background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 20, marginTop: 24 },
+    addTitle: { fontSize: 11, letterSpacing: '.14em', color: c.accent, marginBottom: 16, fontWeight: 800, textTransform: 'uppercase' },
+    addBtn: { background: c.accent, color: c.accentText, border: 'none', borderRadius: 12, padding: '11px 20px', cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: headingFont },
+    qRow: { background: c.card, border: `1px solid ${c.borderSoft}`, borderRadius: 14, padding: '14px 16px', display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 10 },
+    qNum: { color: c.accent, fontSize: 12, fontWeight: 800, minWidth: 24, paddingTop: 2, fontFamily: headingFont },
+    qText: { fontSize: 13, color: c.textDim, marginBottom: 4 },
     qSub: { fontSize: 11, color: c.textFaint },
     x: { background: 'none', border: 'none', color: c.textGhost, cursor: 'pointer', fontSize: 16 },
-    arrowBtn: { background: c.cardAlt, border: `1px solid ${c.borderSoft}`, color: c.textMuted, cursor: 'pointer', fontSize: 10, borderRadius: 4, padding: '4px 8px', lineHeight: 1 },
+    arrowBtn: { background: c.cardAlt, border: `1px solid ${c.borderSoft}`, color: c.textMuted, cursor: 'pointer', fontSize: 10, borderRadius: 6, padding: '4px 8px', lineHeight: 1 },
     editIconBtn: { background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 15 },
-    prevCard: { background: c.card, border: `1px solid ${c.borderSoft}`, borderRadius: 8, padding: 20, marginBottom: 14 },
-    prevPost: { fontSize: 15, color: c.text, fontStyle: 'italic', marginBottom: 16, lineHeight: 1.5 },
-    shareBox: { background: c.card, border: `1px solid ${withAlpha(c.accent, 0.2)}`, borderRadius: 8, padding: '16px 20px', marginBottom: 20 },
-    copyBtn: { background: c.accent, color: c.accentText, border: 'none', borderRadius: 5, padding: '8px 16px', cursor: 'pointer', fontSize: 12, fontWeight: 800, letterSpacing: 0.3, fontFamily: bodyFont },
-    activeCard: { background: c.card, border: `1px solid ${withAlpha(c.success, 0.2)}`, borderRadius: 8, padding: 24, marginBottom: 20 },
-    revealBox: { background: c.cardAlt, border: `1px solid ${withAlpha(c.success, 0.13)}`, borderRadius: 8, padding: 16, marginBottom: 12 },
-    showRevealBtn: { width: '100%', padding: '13px 16px', background: withAlpha(c.success, 0.13), color: c.success, border: `1px solid ${withAlpha(c.success, 0.27)}`, borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 700, fontFamily: bodyFont, letterSpacing: 0.3 },
-    hideRevealBtn: { background: 'none', border: `1px solid ${withAlpha(c.danger, 0.27)}`, color: c.danger, borderRadius: 5, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontFamily: bodyFont },
-    editBtn: { flex: 1, padding: '12px 16px', background: c.card, color: c.accent, border: `1px solid ${withAlpha(c.accent, 0.27)}`, borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700, letterSpacing: 0.3, fontFamily: bodyFont },
+    prevCard: { background: c.card, border: `1px solid ${c.borderSoft}`, borderRadius: 14, padding: 20, marginBottom: 14 },
+    prevPost: { fontSize: 15, color: c.text, marginBottom: 16, lineHeight: 1.5, fontFamily: headingFont, fontWeight: 500 },
+    shareBox: { background: c.card, border: `1px solid ${withAlpha(c.accent, 0.2)}`, borderRadius: 16, padding: '16px 20px', marginBottom: 20 },
+    copyBtn: { background: c.accent, color: c.accentText, border: 'none', borderRadius: 12, padding: '9px 16px', cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: headingFont },
+    activeCard: { background: c.card, border: `1px solid ${withAlpha(c.success, 0.2)}`, borderRadius: 16, padding: 24, marginBottom: 20 },
+    revealBox: { background: c.cardAlt, border: `1px solid ${withAlpha(c.success, 0.13)}`, borderRadius: 14, padding: 16, marginBottom: 12 },
+    showRevealBtn: { width: '100%', padding: '13px 16px', background: withAlpha(c.success, 0.13), color: c.success, border: `1px solid ${withAlpha(c.success, 0.27)}`, borderRadius: 12, cursor: 'pointer', fontSize: 14, fontWeight: 700, fontFamily: headingFont },
+    hideRevealBtn: { background: 'none', border: `1px solid ${withAlpha(c.danger, 0.27)}`, color: c.danger, borderRadius: 20, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontFamily: bodyFont, fontWeight: 700 },
+    editBtn: { flex: 1, padding: '12px 16px', background: c.card, color: c.accent, border: `1px solid ${withAlpha(c.accent, 0.27)}`, borderRadius: 12, cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: headingFont },
     presetGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 },
-    presetBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: c.card, border: `1px solid ${c.border}`, borderRadius: 8, padding: '14px 10px', cursor: 'pointer', fontFamily: bodyFont },
-    colorSwatch: { width: 40, height: 40, padding: 0, border: `1px solid ${c.border}`, borderRadius: 6, background: 'none', cursor: 'pointer' },
-    revealModeBtn: { flex: 1, padding: '12px 16px', background: c.card, color: c.textMuted, border: `1px solid ${c.border}`, borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: bodyFont },
+    presetBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: '14px 10px', cursor: 'pointer', fontFamily: bodyFont },
+    colorSwatch: { width: 40, height: 40, padding: 0, border: `1px solid ${c.border}`, borderRadius: 10, background: 'none', cursor: 'pointer' },
+    revealModeBtn: { flex: 1, padding: '12px 16px', background: c.card, color: c.textMuted, border: `1px solid ${c.border}`, borderRadius: 12, cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: bodyFont },
     revealModeBtnOn: { background: withAlpha(c.accent, 0.13), color: c.accent, border: `1px solid ${withAlpha(c.accent, 0.4)}` },
   }
   return { s, c }
