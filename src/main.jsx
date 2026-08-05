@@ -5,6 +5,7 @@ import HostDashboard from './HostDashboard'
 import PlayerRoom from './PlayerRoom'
 import BigScreen from './BigScreen'
 import BrideSurvey from './BrideSurvey'
+import GuestSurvey from './GuestSurvey'
 
 // Read the query string defensively. Links we share (host/player/screen/bride)
 // all separate params with "&", and email/messaging/notes apps sometimes mangle
@@ -43,6 +44,13 @@ function App() {
   // her real answers before the host builds the Bride Edition trivia.
   if (role === 'bride' && gameId) {
     return <BrideSurvey gameId={gameId} surveyKey={params.get('key') || ''} />
+  }
+
+  // ?game=XXX&role=guest&key=SECRET → the Social Media edition's guest survey,
+  // where each guest digs up and submits their OWN posts for the host to build
+  // into the game (an alternative to the host sourcing every post themselves).
+  if (role === 'guest' && gameId) {
+    return <GuestSurvey gameId={gameId} surveyKey={params.get('key') || ''} />
   }
 
   // ?game=XXX&role=host&key=SECRET → host view locked to one game
