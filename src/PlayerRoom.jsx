@@ -1,11 +1,18 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import { getTheme, ensureGoogleFont, withAlpha, contrastColor, getBrandParts } from './theme'
+import { Avatar, AVATARS } from './Avatar'
+
+const WRONG = '#c0553a' // warm brick red for "incorrect" — reads on the oat paper
 
 export default function PlayerRoom({ gameId, initialName = '', mockGame = null, onExitMock = null }) {
   const isMock = !!mockGame
   const [phase, setPhase] = useState('join')
   const [playerName, setPlayerName] = useState(initialName || (isMock ? 'Preview' : ''))
+  // Everyone gets a field-creature avatar; pre-pick a random one so the join
+  // screen looks alive, but they can tap another.
+  const [selectedAvatar, setSelectedAvatar] = useState(() => AVATARS[Math.floor(Math.random() * AVATARS.length)].id)
+  const [avatarMap, setAvatarMap] = useState({}) // player_name -> avatar id (real games)
   const [game, setGame] = useState(() => isMock ? { ...mockGame, currentQuestion: 0, status: 'lobby', players: [], answers: {} } : null)
   const [error, setError] = useState('')
   const [selectedAnswer, setSelectedAnswer] = useState(null)
@@ -26,6 +33,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   const gameRef = useRef(null)
 
   const theme = getTheme(game)
+  const accent = theme.accentColor || theme.secondaryColor
   const p = buildPlayerStyles(theme)
   const revealMode = game?.revealMode || 'auto'
   // In manual mode the correct answer stays hidden until the host broadcasts
@@ -34,6 +42,13 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   // Mock preview keeps everything in-memory on the game object; real games use the server.
   const playersArr = isMock ? (game?.players || []) : totalsRows.map(([name]) => ({ name }))
   const totalsView = isMock ? computeMockScores() : totalsRows
+
+  // Which avatar a given player chose (self is authoritative locally).
+  function avatarFor(name) {
+    if (name === playerName.trim()) return selectedAvatar
+    if (isMock) return (game?.players || []).find(pl => pl.name === name)?.avatar
+    return avatarMap[name]
+  }
 
   // Answer a player gave for a specific round (only the polled round is known in real games)
   function getRoundAnswer(name, qidx) {
@@ -68,6 +83,14 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     ensureGoogleFont(theme.headingFont)
     ensureGoogleFont(theme.bodyFont)
   }, [theme.headingFont, theme.bodyFont])
+
+  // player_name -> avatar id, tolerating a DB that hasn't added the avatar column.
+  async function refreshAvatars() {
+    if (isMock) return
+    let res = await supabase.from('game_players').select('player_name,avatar').eq('game_id', gameId)
+    if (res.error) res = await supabase.from('game_players').select('player_name').eq('game_id', gameId)
+    if (res.data) setAvatarMap(Object.fromEntries(res.data.map(r => [r.player_name, r.avatar || null])))
+  }
 
   // Applies a status/question change from the server. This is the ONLY place
   // phase transitions happen after joining, so lobby→active works even when
@@ -168,22 +191,23 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
       // current question. Either way it's one ~1KB server-computed response.
       const qidx = phase === 'between' && lastRoundIdx != null ? lastRoundIdx : gameRef.current?.currentQuestion
       if (qidx != null) refreshRoundState(qidx)
+      refreshAvatars()
     }, 2500)
     return () => clearInterval(poll)
   }, [phase, gameId, isMock, lastRoundIdx])
 
   async function joinGame() {
     setError('')
-    if (!playerName.trim()) { setError('Enter your name.'); return }
+    if (!playerName.trim()) { setError('Enter your name to jump in.'); return }
 
     if (isMock) {
-      setGame(g => ({ ...g, players: [{ name: playerName.trim(), joinedAt: Date.now() }] }))
+      setGame(g => ({ ...g, players: [{ name: playerName.trim(), joinedAt: Date.now(), avatar: selectedAvatar }] }))
       setPhase('lobby')
       return
     }
 
     const { data, error: fetchErr } = await supabase.from('games').select('data').eq('game_id', gameId).single()
-    if (fetchErr || !data) { setError('Game not found. Check your link.'); return }
+    if (fetchErr || !data) { setError('We couldn\'t find that game — double-check your link.'); return }
     const g = data.data
 
     // Reuse the existing name row if they rejoin with different capitalization
@@ -191,14 +215,23 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     const match = (existing || []).find(r => r.player_name.toLowerCase() === playerName.trim().toLowerCase())
     const name = match ? match.player_name : playerName.trim()
     if (!match) {
-      const { error: joinErr } = await supabase.from('game_players').insert({ game_id: gameId, player_name: name })
-      if (joinErr && joinErr.code !== '23505') { setError('Could not join: ' + joinErr.message); return }
+      // Try to save their avatar too; if this DB hasn't added the column yet,
+      // fall back to a plain insert so joining still works.
+      let ins = await supabase.from('game_players').insert({ game_id: gameId, player_name: name, avatar: selectedAvatar })
+      if (ins.error && /avatar/i.test(ins.error.message || '')) {
+        ins = await supabase.from('game_players').insert({ game_id: gameId, player_name: name })
+      }
+      if (ins.error && ins.error.code !== '23505') { setError('Couldn\'t join: ' + ins.error.message); return }
+    } else {
+      // Rejoining — keep their chosen creature in sync (ignore if column absent).
+      await supabase.from('game_players').update({ avatar: selectedAvatar }).eq('game_id', gameId).eq('player_name', name)
     }
     setPlayerName(name)
 
     setGame(g)
     gameRef.current = g
     await refreshRoundState(g.currentQuestion)
+    refreshAvatars()
 
     // If they answered the current question before (e.g. phone reload), restore it
     const { data: mine } = await supabase.from('answers').select('answer')
@@ -238,7 +271,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     if (subErr) {
       setSubmitted(false)
       setSelectedAnswer(null)
-      setError('Answer failed to send — tap to try again.')
+      setError('That didn\'t send — tap your answer again.')
       return
     }
     setError('')
@@ -279,8 +312,8 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     return (
       <div>
         <div style={mockBanner}>
-          <span>🎮 PREVIEW MODE — nothing here is saved or seen by real players</span>
-          <button onClick={onExitMock} style={mockExitBtn}>✕ Exit Preview</button>
+          <span>🎮 Preview — nothing here is saved or seen by real players</span>
+          <button onClick={onExitMock} style={mockExitBtn}>✕ Exit preview</button>
         </div>
         {node}
       </div>
@@ -299,18 +332,49 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
       .then(({ data }) => { if (data) setMyHistory(Object.fromEntries(data.map(r => [r.question_idx, r.answer]))) })
   }, [phase, isMock, gameId])
 
+  // A leaderboard/standings row with the player's creature.
+  function PlayerRow({ name, left, right, highlight, size = 30 }) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '7px 6px', borderRadius: 12, background: highlight ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
+        {left}
+        <Avatar id={avatarFor(name)} fallback={name} size={size} />
+        <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: highlight ? theme.primaryColor : theme.textColor }}>{name}</span>
+        {right}
+      </div>
+    )
+  }
+
   // ── JOIN ──────────────────────────────────────────────────────────────────
   if (phase === 'join') return wrapMock(
     <ThemedPage theme={theme}>
       <div style={p.card}>
         <Logo theme={theme} p={p} />
         <div style={p.sub}>{theme.tagline}</div>
-        <div style={p.field}>
-          <label style={p.label}>YOUR NAME</label>
+
+        <div style={p.pickTitle}>Pick your character</div>
+        <div style={p.avGrid}>
+          {AVATARS.map(a => {
+            const on = a.id === selectedAvatar
+            return (
+              <button
+                key={a.id}
+                onClick={() => setSelectedAvatar(a.id)}
+                aria-pressed={on}
+                title={a.name}
+                style={{ ...p.avCell, borderColor: on ? theme.primaryColor : withAlpha(theme.textColor, 0.1), boxShadow: on ? `0 0 0 3px ${withAlpha(theme.primaryColor, 0.15)}` : 'none' }}
+              >
+                <Avatar id={a.id} size={44} />
+              </button>
+            )
+          })}
+        </div>
+
+        <div style={{ ...p.field, marginTop: 14 }}>
+          <label style={p.label}>Your name</label>
           <input style={p.input} placeholder="How should we call you?" value={playerName} onChange={e => setPlayerName(e.target.value)} onKeyDown={e => e.key === 'Enter' && joinGame()} autoFocus />
         </div>
         {error && <div style={p.err}>{error}</div>}
-        <button style={p.joinBtn} onClick={joinGame}>Join Game →</button>
+        <button style={p.joinBtn} onClick={joinGame}>Join the game →</button>
       </div>
     </ThemedPage>
   )
@@ -324,18 +388,24 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
         {theme.welcomeMessage?.trim() && (
           <div style={p.welcomeBox}>{theme.welcomeMessage}</div>
         )}
-        <div style={p.waiting}><span style={p.dot}>●</span> Waiting for host to start…</div>
-        <div style={{ textAlign: 'center', color: withAlpha(theme.textColor, 0.5), fontSize: 12, marginBottom: 12 }}>{playersArr.length} player{playersArr.length !== 1 ? 's' : ''} joined</div>
-        <div style={{ textAlign: 'center', fontSize: 13, color: withAlpha(theme.textColor, 0.65), marginBottom: 20 }}>You're in as <strong style={{ color: theme.primaryColor }}>{playerName}</strong></div>
+        <div style={p.waiting}><span style={p.dot}>●</span> Waiting for the host to start…</div>
+        <div style={{ textAlign: 'center', fontSize: 13, color: withAlpha(theme.textColor, 0.65), marginBottom: 6 }}>
+          You're in as <strong style={{ color: theme.primaryColor }}>{playerName}</strong>
+        </div>
+        <div style={{ textAlign: 'center', color: withAlpha(theme.textColor, 0.5), fontSize: 12, marginBottom: 18 }}>{playersArr.length} {playersArr.length === 1 ? 'friend' : 'friends'} here so far</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
-          {playersArr.map(pl => (
-            <div key={pl.name} style={{ padding: '6px 14px', border: `1px solid ${pl.name === playerName ? theme.primaryColor : withAlpha(theme.textColor, 0.2)}`, background: pl.name === playerName ? withAlpha(theme.primaryColor, 0.1) : withAlpha(theme.textColor, 0.06), borderRadius: 20, fontSize: 12, color: theme.textColor }}>
-              {pl.name === playerName ? '★ ' : ''}{pl.name}
-            </div>
-          ))}
+          {playersArr.map(pl => {
+            const me = pl.name === playerName
+            return (
+              <div key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 12px 5px 5px', border: `1.5px solid ${me ? theme.primaryColor : withAlpha(theme.textColor, 0.12)}`, background: me ? withAlpha(theme.primaryColor, 0.08) : theme.cardColor, borderRadius: 22, fontSize: 12.5, fontWeight: 700, color: me ? theme.primaryColor : theme.textColor }}>
+                <Avatar id={avatarFor(pl.name)} fallback={pl.name} size={24} />
+                {pl.name}
+              </div>
+            )
+          })}
         </div>
         {isMock && (
-          <button style={{ ...p.joinBtn, marginTop: 28 }} onClick={startMockGame}>🚀 Simulate Host Starting →</button>
+          <button style={{ ...p.joinBtn, marginTop: 28 }} onClick={startMockGame}>🚀 Simulate host starting →</button>
         )}
       </div>
     </ThemedPage>
@@ -346,83 +416,82 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     const q = game.questions[game.currentQuestion]
     if (!q) return wrapMock(<ThemedPage theme={theme}><div style={p.card}><div style={p.waiting}>Loading…</div></div></ThemedPage>)
     const isCorrect = submitted && selectedAnswer === q.author
+    const choices = q.choices.filter(c => c && c.trim())
 
     return wrapMock(
       <ThemedPage theme={theme}>
         <div style={p.playWrap}>
           <div style={p.progressRow}>
-            <span style={p.progressLabel}>Q{game.currentQuestion + 1} / {game.questions.length}</span>
+            <span style={p.progressLabel}>{game.currentQuestion + 1} <span style={{ color: withAlpha(theme.textColor, 0.4) }}>/ {game.questions.length}</span></span>
             <div style={p.progressTrack}>
               <div style={{ ...p.progressFill, width: `${((game.currentQuestion + 1) / game.questions.length) * 100}%` }} />
             </div>
           </div>
           <div style={p.bubble}>
-            {game.edition !== 'bride' && <div style={p.handle}>@someone</div>}
-            {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, marginBottom: 10, marginTop: 4, display: 'block' }} />}
+            <div style={p.qEyebrow}>{q.questionLabel?.trim() || theme.questionLabel}</div>
+            {q.questionImage && <img src={q.questionImage} alt="" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 12, marginBottom: 12, display: 'block' }} />}
             <div style={p.postText}>{q.post}</div>
           </div>
-          <div style={p.whoLabel}>{q.questionLabel?.trim() || theme.questionLabel}</div>
-          <div style={p.choiceGrid}>
-            {q.choices.filter(c => c && c.trim()).map(choice => {
-              let bg = theme.cardColor, border = withAlpha(theme.textColor, 0.18), color = theme.textColor
+          <div style={p.optList}>
+            {choices.map((choice, idx) => {
+              const letter = String.fromCharCode(65 + idx)
+              let bg = theme.cardColor, border = withAlpha(theme.textColor, 0.12), color = theme.textColor
+              let badgeBg = withAlpha(theme.textColor, 0.08), badgeColor = withAlpha(theme.textColor, 0.55), mark = letter
               if (submitted) {
-                if (choice === q.author && revealed) { bg = withAlpha(theme.secondaryColor, 0.13); border = theme.secondaryColor; color = theme.secondaryColor }
-                else if (choice === selectedAnswer && choice !== q.author && revealed) { bg = '#ff6b6b22'; border = '#ff6b6b'; color = '#ff6b6b' }
-                else if (choice === selectedAnswer && !revealed) { bg = withAlpha(theme.primaryColor, 0.13); border = theme.primaryColor; color = theme.primaryColor }
-                else { border = withAlpha(theme.textColor, 0.08); color = withAlpha(theme.textColor, 0.2) }
+                if (choice === q.author && revealed) { bg = withAlpha(theme.secondaryColor, 0.14); border = theme.secondaryColor; color = theme.secondaryColor; badgeBg = theme.secondaryColor; badgeColor = contrastColor(theme.secondaryColor); mark = '✓' }
+                else if (choice === selectedAnswer && choice !== q.author && revealed) { bg = withAlpha(WRONG, 0.12); border = WRONG; color = WRONG; badgeBg = WRONG; badgeColor = '#fff'; mark = '✕' }
+                else if (choice === selectedAnswer && !revealed) { bg = withAlpha(theme.primaryColor, 0.12); border = theme.primaryColor; color = theme.primaryColor; badgeBg = theme.primaryColor; badgeColor = contrastColor(theme.primaryColor) }
+                else { border = withAlpha(theme.textColor, 0.08); color = withAlpha(theme.textColor, 0.3); badgeColor = withAlpha(theme.textColor, 0.3) }
               }
               return (
-                <button key={choice} style={{ ...p.choiceBtn, background: bg, borderColor: border, color }} onClick={() => submitAnswer(choice)} disabled={submitted}>
-                  {submitted && revealed && choice === q.author && <span style={{ marginRight: 6 }}>✓</span>}
-                  {submitted && revealed && choice === selectedAnswer && choice !== q.author && <span style={{ marginRight: 6 }}>✗</span>}
-                  {choice}
+                <button key={choice} style={{ ...p.optBtn, background: bg, borderColor: border, color }} onClick={() => submitAnswer(choice)} disabled={submitted}>
+                  <span style={{ ...p.optBadge, background: badgeBg, color: badgeColor }}>{mark}</span>
+                  <span>{choice}</span>
                 </button>
               )
             })}
           </div>
           {submitted && revealed && (
-            <div style={{ ...p.feedback, background: isCorrect ? withAlpha(theme.secondaryColor, 0.13) : '#ff6b6b22', borderColor: isCorrect ? theme.secondaryColor : '#ff6b6b', color: isCorrect ? theme.secondaryColor : '#ff6b6b' }}>
-              {isCorrect ? '🎉 Correct! +1 point' : `❌ It was ${q.author}`}
+            <div style={{ ...p.feedback, background: isCorrect ? withAlpha(theme.secondaryColor, 0.14) : withAlpha(WRONG, 0.12), color: isCorrect ? theme.secondaryColor : WRONG }}>
+              {isCorrect ? '🎉 Nailed it! +1 point' : `So close — it was ${q.author}`}
             </div>
           )}
           {submitted && !revealed && (
-            <div style={p.locking}>{revealMode === 'manual' ? "Answer locked in — waiting for the host to reveal…" : 'Locking in your answer…'}</div>
+            <div style={p.locking}>{revealMode === 'manual' ? 'Locked in — waiting for the host to reveal…' : 'Locking in your answer…'}</div>
           )}
           {!submitted && error && <div style={p.err}>{error}</div>}
-          {!submitted && <div style={p.tapHint}>Tap to answer</div>}
+          {!submitted && <div style={p.tapHint}>Tap your guess</div>}
           {isMock && submitted && !revealed && revealMode === 'manual' && (
-            <button style={{ ...p.joinBtn, marginTop: 8 }} onClick={mockReveal}>🎉 Reveal Answer (simulate host)</button>
+            <button style={{ ...p.joinBtn, marginTop: 8 }} onClick={mockReveal}>🎉 Reveal answer (simulate host)</button>
           )}
           {submitted && revealImageVisible && q.revealImage && (
             <div style={p.revealBox}>
-              <div style={p.revealLabel}>🎉 HOST REVEAL</div>
-              <img src={q.revealImage} alt="reveal" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8, border: `1px solid ${withAlpha(theme.secondaryColor, 0.27)}`, display: 'block' }} />
+              <div style={p.revealLabel}>🎉 THE REVEAL</div>
+              <img src={q.revealImage} alt="reveal" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 12, border: `1px solid ${withAlpha(theme.secondaryColor, 0.27)}`, display: 'block' }} />
             </div>
           )}
           {submitted && !revealImageVisible && q.revealImage && (
-            <div style={{ textAlign: 'center', color: withAlpha(theme.textColor, 0.2), fontSize: 11, letterSpacing: 1, marginTop: 20 }}>Waiting for host reveal…</div>
+            <div style={{ textAlign: 'center', color: withAlpha(theme.textColor, 0.3), fontSize: 12, marginTop: 18 }}>Waiting for the host reveal…</div>
           )}
           {submitted && revealed && playersArr.length > 0 && (
             <div style={p.lbBox}>
-              <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>THIS ROUND</div>
+              <div style={p.lbHead}>This round</div>
               {playersArr.map(pl => {
                 const ans = getRoundAnswer(pl.name, game.currentQuestion)
                 const state = ans == null ? 'waiting' : ans === q.author ? 'right' : 'wrong'
                 return (
-                  <div key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', borderRadius: 4, background: pl.name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
-                    <span style={{ width: 24, fontSize: 14, textAlign: 'center' }}>{state === 'right' ? '✅' : state === 'wrong' ? '❌' : '⏳'}</span>
-                    <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: pl.name === playerName ? theme.primaryColor : theme.textColor }}>{pl.name}</span>
-                    <span style={{ fontSize: 12, color: state === 'waiting' ? withAlpha(theme.textColor, 0.4) : state === 'right' ? theme.secondaryColor : '#ff6b6b' }}>
+                  <PlayerRow key={pl.name} name={pl.name} highlight={pl.name === playerName}
+                    right={<span style={{ fontSize: 12, fontWeight: 700, color: state === 'waiting' ? withAlpha(theme.textColor, 0.4) : state === 'right' ? theme.secondaryColor : WRONG }}>
                       {state === 'waiting' ? 'still guessing…' : state === 'right' ? 'got it!' : `guessed ${ans}`}
-                    </span>
-                  </div>
+                    </span>}
+                  />
                 )
               })}
             </div>
           )}
           {isMock && submitted && revealed && (
             <button style={p.joinBtn} onClick={advanceMockQuestion}>
-              {game.currentQuestion + 1 >= game.questions.length ? 'Finish Preview →' : 'Next Question →'}
+              {game.currentQuestion + 1 >= game.questions.length ? 'Finish preview →' : 'Next question →'}
             </button>
           )}
         </div>
@@ -443,34 +512,31 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
           {theme.logoImage && <img src={theme.logoImage} alt="logo" style={p.logoImg} />}
           {lq && (
             <div style={p.lbBox}>
-              <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 6 }}>ROUND {li + 1} RESULTS</div>
-              <div style={{ fontSize: 12, color: withAlpha(theme.textColor, 0.65), marginBottom: 14 }}>The answer was <strong style={{ color: theme.secondaryColor }}>{lq.author}</strong></div>
+              <div style={p.lbHead}>Round {li + 1} results</div>
+              <div style={{ fontSize: 12.5, color: withAlpha(theme.textColor, 0.65), marginBottom: 12 }}>The answer was <strong style={{ color: theme.secondaryColor }}>{lq.author}</strong></div>
               {playersArr.map(pl => {
                 const ans = getRoundAnswer(pl.name, li)
                 const state = ans == null ? 'none' : ans === lq.author ? 'right' : 'wrong'
                 return (
-                  <div key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', borderRadius: 4, background: pl.name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
-                    <span style={{ width: 24, fontSize: 14, textAlign: 'center' }}>{state === 'right' ? '✅' : state === 'wrong' ? '❌' : '—'}</span>
-                    <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: pl.name === playerName ? theme.primaryColor : theme.textColor }}>{pl.name}</span>
-                    <span style={{ fontSize: 12, color: state === 'none' ? withAlpha(theme.textColor, 0.4) : state === 'right' ? theme.secondaryColor : '#ff6b6b' }}>
+                  <PlayerRow key={pl.name} name={pl.name} highlight={pl.name === playerName}
+                    right={<span style={{ fontSize: 12, fontWeight: 700, color: state === 'none' ? withAlpha(theme.textColor, 0.4) : state === 'right' ? theme.secondaryColor : WRONG }}>
                       {state === 'none' ? 'no answer' : state === 'right' ? '+1 point' : `guessed ${ans}`}
-                    </span>
-                  </div>
+                    </span>}
+                  />
                 )
               })}
             </div>
           )}
           <div style={p.lbBox}>
-            <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>SCOREBOARD</div>
+            <div style={p.lbHead}>Scoreboard</div>
             {totals.map(([name, score], i) => (
-              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', borderRadius: 4, background: name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
-                <span style={{ width: 24, fontSize: 14, textAlign: 'center' }}>{['🏆', '🥈', '🥉'][i] || `#${i + 1}`}</span>
-                <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: name === playerName ? theme.primaryColor : theme.textColor }}>{name}</span>
-                <span style={{ fontSize: 13, color: theme.primaryColor }}>{score} pt{score !== 1 ? 's' : ''}</span>
-              </div>
+              <PlayerRow key={name} name={name} highlight={name === playerName}
+                left={<span style={{ width: 22, textAlign: 'center', fontSize: 14 }}>{['🏆', '🥈', '🥉'][i] || `#${i + 1}`}</span>}
+                right={<span style={{ fontSize: 13, fontWeight: 800, color: theme.primaryColor }}>{score} pt{score !== 1 ? 's' : ''}</span>}
+              />
             ))}
           </div>
-          <button style={p.joinBtn} onClick={() => setPhase('playing')}>I'm Ready — Next Question →</button>
+          <button style={p.joinBtn} onClick={() => setPhase('playing')}>I'm ready — next question →</button>
         </div>
       </ThemedPage>
     )
@@ -482,39 +548,50 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     const allScores = totalsView
     const myRank = allScores.findIndex(([name]) => name === playerName) + 1
     const total = game.questions.length
+    const ratio = total ? myScore / total : 0
+    const headline = ratio >= 0.9 ? 'You really know them!' : ratio >= 0.7 ? 'Nicely done!' : ratio >= 0.5 ? 'Not bad at all!' : ratio >= 0.3 ? 'A few got you!' : 'It\'s the taking part that counts!'
+    const rankLine = myRank === 1 ? 'First place — nobody knows them better.' : myRank === 2 ? 'Second place, so close to the top!' : myRank === 3 ? 'Third place — on the podium!' : `You finished #${myRank} of ${allScores.length}.`
 
     return wrapMock(
       <ThemedPage theme={theme}>
         <div style={p.card}>
           {theme.logoImage && <img src={theme.logoImage} alt="logo" style={p.logoImg} />}
-          <div style={p.finTitle}>GAME OVER!</div>
-          <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <div style={{ fontSize: 64, fontWeight: 900, color: theme.textColor, lineHeight: 1 }}>
-              {myScore}<span style={{ fontSize: 32, color: withAlpha(theme.textColor, 0.35) }}>/{total}</span>
-            </div>
-            <div style={{ fontSize: 12, color: withAlpha(theme.textColor, 0.5), letterSpacing: 2, marginTop: 8 }}>your score · rank #{myRank}</div>
+          <div style={p.eyebrow}>The reveal</div>
+          <div style={p.burst}>
+            <span style={{ ...p.halo, borderColor: withAlpha(theme.primaryColor, 0.4) }} />
+            {['-2px 20px', '14px auto -2px', 'auto -2px 8px', '-4px auto 22px'].map((pos, i) => {
+              const [t, r, b] = pos.split(' ')
+              return <span key={i} style={{ position: 'absolute', top: t !== 'auto' ? t : undefined, right: r !== 'auto' ? r : undefined, bottom: b !== 'auto' ? b : undefined, color: accent, fontSize: 13 }}>✦</span>
+            })}
+            <Avatar id={selectedAvatar} size={104} style={{ border: `3px solid ${theme.cardColor}`, boxShadow: `0 8px 20px -10px ${withAlpha(theme.textColor, 0.5)}` }} />
           </div>
+          <div style={{ ...p.eyebrow, marginTop: 16, marginBottom: 2 }}>Your score</div>
+          <div style={{ textAlign: 'center', fontFamily: theme.headingFont, fontWeight: 600, color: theme.primaryColor, fontSize: 44, lineHeight: 1 }}>
+            {myScore}<span style={{ color: withAlpha(theme.textColor, 0.35), fontSize: 26 }}> / {total}</span>
+          </div>
+          <div style={{ textAlign: 'center', fontFamily: theme.headingFont, fontWeight: 600, color: theme.textColor, fontSize: 24, marginTop: 12 }}>{headline}</div>
+          <div style={{ textAlign: 'center', fontSize: 13, color: withAlpha(theme.textColor, 0.6), marginTop: 6, marginBottom: 26 }}>{rankLine}</div>
+
           <div style={p.lbBox}>
-            <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>FINAL STANDINGS</div>
+            <div style={p.lbHead}>Final standings</div>
             {allScores.map(([name, score], i) => (
-              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 6px', borderRadius: 4, background: name === playerName ? withAlpha(theme.primaryColor, 0.1) : 'transparent', marginBottom: 4 }}>
-                <span style={{ width: 28, fontSize: 16, textAlign: 'center' }}>{['🏆','🥈','🥉'][i] || `#${i+1}`}</span>
-                <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: name === playerName ? theme.primaryColor : theme.textColor }}>{name}</span>
-                <span style={{ fontSize: 13, color: theme.primaryColor }}>{score} pts</span>
-              </div>
+              <PlayerRow key={name} name={name} highlight={name === playerName} size={32}
+                left={<span style={{ width: 26, textAlign: 'center', fontSize: 15 }}>{['🏆', '🥈', '🥉'][i] || `#${i + 1}`}</span>}
+                right={<span style={{ fontSize: 13, fontWeight: 800, color: theme.primaryColor }}>{score} pts</span>}
+              />
             ))}
           </div>
-          <div style={{ marginTop: 28 }}>
-            <div style={{ fontSize: 10, letterSpacing: 3, color: withAlpha(theme.textColor, 0.5), marginBottom: 14 }}>YOUR ANSWERS</div>
+          <div>
+            <div style={p.lbHead}>Your answers</div>
             {game.questions.map((q, i) => {
               const myAns = isMock ? (game.answers || {})[`${playerName}:::${i}`] : myHistory[i]
               const correct = myAns === q.author
               return (
-                <div key={i} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${withAlpha(theme.textColor, 0.1)}` }}>
-                  <div style={{ fontSize: 12, color: withAlpha(theme.textColor, 0.5), fontStyle: 'italic', marginBottom: 4 }}>"{q.post.substring(0, 65)}{q.post.length > 65 ? '…' : ''}"</div>
-                  {q.revealImage && <img src={q.revealImage} alt="" style={{ width: 140, aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 4, marginBottom: 6, opacity: 0.8, display: 'block' }} />}
-                  <div style={{ fontSize: 12, fontWeight: 700, color: correct ? theme.secondaryColor : '#ff6b6b' }}>
-                    {correct ? '✓' : '✗'} {myAns || '—'} {!correct && `(was: ${q.author})`}
+                <div key={i} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: `1px solid ${withAlpha(theme.textColor, 0.08)}` }}>
+                  <div style={{ fontSize: 12.5, color: withAlpha(theme.textColor, 0.55), marginBottom: 5 }}>"{q.post.substring(0, 70)}{q.post.length > 70 ? '…' : ''}"</div>
+                  {q.revealImage && <img src={q.revealImage} alt="" style={{ width: 120, aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 10, marginBottom: 6, display: 'block' }} />}
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: correct ? theme.secondaryColor : WRONG }}>
+                    {correct ? '✓' : '✕'} {myAns || '—'} {!correct && `· it was ${q.author}`}
                   </div>
                 </div>
               )
@@ -528,8 +605,8 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
   return wrapMock(<ThemedPage theme={theme}><div style={p.card}><div style={p.waiting}>Loading…</div></div></ThemedPage>)
 }
 
-const mockBanner = { position: 'sticky', top: 0, zIndex: 2000, background: '#000', color: '#ffd166', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontFamily: "'Courier New', monospace", fontSize: 11, letterSpacing: 0.5, borderBottom: '2px solid #ffd166' }
-const mockExitBtn = { background: '#ffd166', color: '#111', border: 'none', borderRadius: 3, padding: '6px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 900, letterSpacing: 1, fontFamily: "'Courier New', monospace", whiteSpace: 'nowrap' }
+const mockBanner = { position: 'sticky', top: 0, zIndex: 2000, background: '#2e2a1f', color: '#f0e4c4', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontFamily: "'Nunito Sans', sans-serif", fontSize: 12, fontWeight: 700, borderBottom: '2px solid #c26742' }
+const mockExitBtn = { background: '#c26742', color: '#fff', border: 'none', borderRadius: 20, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 800, fontFamily: "'Nunito Sans', sans-serif", whiteSpace: 'nowrap' }
 
 function ThemedPage({ theme, children }) {
   return (
@@ -552,38 +629,46 @@ function Logo({ theme, p }) {
 
 function buildPlayerStyles(theme) {
   const { primaryColor: primary, secondaryColor: secondary, cardColor: card, textColor: text, headingFont, bodyFont } = theme
+  const accent = theme.accentColor || secondary
+  const soft = (c, a) => withAlpha(c, a)
   return {
-    card: { width: '100%', maxWidth: 420, paddingTop: 40, position: 'relative', zIndex: 1 },
-    playWrap: { width: '100%', maxWidth: 420, paddingTop: 20, position: 'relative', zIndex: 1 },
-    logo: { fontSize: 32, fontWeight: 900, letterSpacing: 4, color: text, fontFamily: headingFont, textAlign: 'center', marginBottom: 6, textTransform: 'uppercase' },
-    logoImg: { maxWidth: 220, maxHeight: 110, objectFit: 'contain', display: 'block', margin: '0 auto 14px' },
+    card: { width: '100%', maxWidth: 430, paddingTop: 30, position: 'relative', zIndex: 1 },
+    playWrap: { width: '100%', maxWidth: 430, paddingTop: 16, position: 'relative', zIndex: 1 },
+    logo: { fontSize: 34, fontWeight: 600, color: text, fontFamily: headingFont, textAlign: 'center', marginBottom: 4, lineHeight: 1 },
     accent: { color: primary },
-    sub: { textAlign: 'center', color: withAlpha(text, 0.45), fontSize: 12, letterSpacing: 2, marginBottom: 36 },
-    gameTitle: { fontSize: 22, fontWeight: 900, color: primary, textAlign: 'center', marginBottom: 28, fontFamily: headingFont },
-    welcomeBox: { background: card, border: `1px solid ${withAlpha(text, 0.12)}`, borderRadius: 10, padding: '18px 20px', marginBottom: 24, fontSize: 13, color: text, lineHeight: 1.65, whiteSpace: 'pre-line', textAlign: 'left' },
-    field: { marginBottom: 20 },
-    label: { display: 'block', fontSize: 10, letterSpacing: 2, color: withAlpha(text, 0.5), marginBottom: 8, fontWeight: 700 },
-    input: { width: '100%', background: card, border: `1px solid ${withAlpha(text, 0.15)}`, borderRadius: 4, color: text, padding: '14px 16px', fontSize: 15, fontFamily: bodyFont, boxSizing: 'border-box' },
-    err: { color: '#ff6b6b', fontSize: 12, marginBottom: 16, textAlign: 'center' },
-    joinBtn: { width: '100%', padding: '16px', background: primary, color: contrastColor(primary), border: 'none', borderRadius: 4, fontSize: 15, fontWeight: 900, cursor: 'pointer', letterSpacing: 2, fontFamily: headingFont, marginTop: 8 },
-    waiting: { textAlign: 'center', color: withAlpha(text, 0.65), fontSize: 14, padding: '40px 0 16px', letterSpacing: 1 },
+    logoImg: { maxWidth: 220, maxHeight: 110, objectFit: 'contain', display: 'block', margin: '0 auto 14px' },
+    eyebrow: { textAlign: 'center', color: accent, fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', fontWeight: 800 },
+    sub: { textAlign: 'center', color: soft(text, 0.6), fontSize: 13.5, marginBottom: 26, lineHeight: 1.5 },
+    gameTitle: { fontSize: 25, fontWeight: 600, color: primary, textAlign: 'center', marginBottom: 22, fontFamily: headingFont, lineHeight: 1.12 },
+    welcomeBox: { background: card, border: `1px solid ${soft(text, 0.1)}`, borderRadius: 16, padding: '18px 20px', marginBottom: 24, fontSize: 13.5, color: text, lineHeight: 1.65, whiteSpace: 'pre-line', textAlign: 'left' },
+    field: { marginBottom: 14 },
+    label: { display: 'block', fontSize: 10, letterSpacing: '.16em', color: soft(text, 0.55), marginBottom: 7, fontWeight: 800, textTransform: 'uppercase' },
+    input: { width: '100%', background: card, border: `1.5px solid ${soft(text, 0.13)}`, borderRadius: 14, color: text, padding: '14px 16px', fontSize: 15, fontFamily: bodyFont, boxSizing: 'border-box' },
+    err: { color: WRONG, fontSize: 12.5, marginBottom: 14, textAlign: 'center', fontWeight: 700 },
+    joinBtn: { width: '100%', padding: '15px', background: primary, color: contrastColor(primary), border: 'none', borderRadius: 16, fontSize: 15, fontWeight: 800, cursor: 'pointer', letterSpacing: '.01em', fontFamily: headingFont, marginTop: 10, boxShadow: `0 8px 18px -10px ${soft(primary, 0.9)}` },
+    waiting: { textAlign: 'center', color: soft(text, 0.65), fontSize: 14, padding: '30px 0 14px' },
     dot: { color: secondary, marginRight: 8 },
-    progressRow: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 },
-    progressLabel: { fontSize: 10, letterSpacing: 2, color: withAlpha(text, 0.5), whiteSpace: 'nowrap' },
-    progressTrack: { flex: 1, height: 3, background: withAlpha(text, 0.12), borderRadius: 2 },
-    progressFill: { height: '100%', background: primary, borderRadius: 2, transition: 'width 0.4s' },
-    bubble: { background: card, border: `1px solid ${withAlpha(text, 0.12)}`, borderRadius: 12, borderTopLeftRadius: 4, padding: '16px 18px', marginBottom: 24 },
-    handle: { fontSize: 11, color: withAlpha(text, 0.5), marginBottom: 8, letterSpacing: 1 },
-    postText: { fontSize: 16, color: text, lineHeight: 1.65 },
-    whoLabel: { fontSize: 10, letterSpacing: 3, color: withAlpha(text, 0.5), marginBottom: 14, textAlign: 'center' },
-    choiceGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 },
-    choiceBtn: { padding: '16px 10px', border: '2px solid', borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s', fontFamily: bodyFont },
-    feedback: { border: '1px solid', borderRadius: 6, padding: '13px 16px', textAlign: 'center', fontSize: 14, fontWeight: 700, marginBottom: 16 },
-    locking: { textAlign: 'center', color: withAlpha(text, 0.5), fontSize: 12, letterSpacing: 1, padding: '10px 0' },
-    tapHint: { textAlign: 'center', color: withAlpha(text, 0.25), fontSize: 11, letterSpacing: 2 },
-    revealBox: { marginTop: 20, background: card, border: `1px solid ${withAlpha(secondary, 0.13)}`, borderRadius: 8, padding: 16 },
-    revealLabel: { fontSize: 10, letterSpacing: 3, color: secondary, marginBottom: 10 },
-    finTitle: { fontSize: 36, fontWeight: 900, color: primary, textAlign: 'center', fontFamily: headingFont, letterSpacing: 4, marginBottom: 24 },
-    lbBox: { background: card, border: `1px solid ${withAlpha(text, 0.12)}`, borderRadius: 6, padding: '16px 20px', marginBottom: 28 },
+    pickTitle: { textAlign: 'center', fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: soft(text, 0.55), fontWeight: 800, margin: '4px 0 12px' },
+    avGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 },
+    avCell: { display: 'grid', placeItems: 'center', padding: 9, borderRadius: 16, border: '1.5px solid', background: card, cursor: 'pointer' },
+    progressRow: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 },
+    progressLabel: { fontSize: 17, fontWeight: 600, color: text, whiteSpace: 'nowrap', fontFamily: headingFont },
+    progressTrack: { flex: 1, height: 6, background: soft(text, 0.12), borderRadius: 6, overflow: 'hidden' },
+    progressFill: { height: '100%', background: primary, borderRadius: 6, transition: 'width 0.4s' },
+    bubble: { background: soft(accent, 0.09), border: `1px solid ${soft(accent, 0.18)}`, borderRadius: 18, padding: '16px 18px', marginBottom: 18 },
+    qEyebrow: { fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: accent, fontWeight: 800, marginBottom: 8 },
+    postText: { fontSize: 18, color: text, lineHeight: 1.35, fontFamily: headingFont, fontWeight: 500 },
+    optList: { display: 'flex', flexDirection: 'column', gap: 9, marginBottom: 16 },
+    optBtn: { display: 'flex', alignItems: 'center', gap: 11, width: '100%', padding: '13px 14px', border: '1.5px solid', borderRadius: 15, fontSize: 14.5, fontWeight: 700, cursor: 'pointer', transition: 'all .15s', fontFamily: bodyFont, textAlign: 'left' },
+    optBadge: { width: 24, height: 24, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 800, flex: 'none' },
+    feedback: { borderRadius: 14, padding: '13px 16px', textAlign: 'center', fontSize: 14.5, fontWeight: 700, marginBottom: 16, fontFamily: headingFont },
+    locking: { textAlign: 'center', color: soft(text, 0.5), fontSize: 12.5, padding: '8px 0' },
+    tapHint: { textAlign: 'center', color: soft(text, 0.35), fontSize: 12 },
+    revealBox: { marginTop: 18, background: card, border: `1px solid ${soft(secondary, 0.2)}`, borderRadius: 16, padding: 16 },
+    revealLabel: { fontSize: 10, letterSpacing: '.18em', color: secondary, marginBottom: 10, fontWeight: 800 },
+    lbBox: { background: card, border: `1px solid ${soft(text, 0.1)}`, borderRadius: 16, padding: '16px 18px', marginBottom: 22 },
+    lbHead: { fontSize: 10, letterSpacing: '.2em', color: soft(text, 0.5), marginBottom: 10, fontWeight: 800, textTransform: 'uppercase' },
+    burst: { position: 'relative', width: 150, height: 150, margin: '8px auto 0', display: 'grid', placeItems: 'center' },
+    halo: { position: 'absolute', inset: 0, borderRadius: '50%', border: '2px dashed', pointerEvents: 'none' },
   }
 }
