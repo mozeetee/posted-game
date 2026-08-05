@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import QRCode from 'qrcode'
 import { supabase } from './supabase'
 import { getTheme, ensureGoogleFont, withAlpha, contrastColor, getBrandParts } from './theme'
+import { Avatar } from './Avatar'
 
 // Read-only, TV-optimized view of a game. Open on a laptop plugged into a TV
 // (or cast the browser tab) so the whole room shares one big visual: the
@@ -16,6 +17,7 @@ export default function BigScreen({ gameId }) {
   const [players, setPlayers] = useState([]) // [{name}]
   const [totals, setTotals] = useState([])   // [[name, total], ...] sorted
   const [roundAnswers, setRoundAnswers] = useState({}) // name -> answer for currentQ
+  const [avatars, setAvatars] = useState({}) // name -> avatar id
   const [qr, setQr] = useState(null)
   const stateRef = useRef({ status: 'lobby', currentQ: 0 })
 
@@ -45,12 +47,14 @@ export default function BigScreen({ gameId }) {
     let stopped = false
     async function tick() {
       const cq = stateRef.current.currentQ
-      const [st, rv, rs] = await Promise.all([
+      const [st, rv, rs, av] = await Promise.all([
         supabase.from('games').select('status:data->>status,current_question:data->currentQuestion').eq('game_id', gameId).single(),
         supabase.from('reveals').select('question_idx').eq('game_id', gameId).eq('question_idx', cq),
         supabase.rpc('round_state', { gid: gameId, qidx: cq }),
+        supabase.from('game_players').select('player_name,avatar').eq('game_id', gameId),
       ])
       if (stopped) return
+      if (!av.error && av.data) setAvatars(Object.fromEntries(av.data.map(r => [r.player_name, r.avatar || null])))
       if (st.data) {
         setStatus(st.data.status)
         setCurrentQ(st.data.current_question)
@@ -97,6 +101,7 @@ export default function BigScreen({ gameId }) {
         {top.map(([name, score], i) => (
           <div key={name} style={s.boardRow}>
             <span style={s.boardRank}>{['🏆', '🥈', '🥉'][i] || `#${i + 1}`}</span>
+            <Avatar id={avatars[name]} fallback={name} size={34} />
             <span style={s.boardName}>{name}</span>
             <span style={s.boardScore}>{score}</span>
           </div>
@@ -123,7 +128,7 @@ export default function BigScreen({ gameId }) {
             <div style={s.lobbyPlayers}>
               <div style={s.boardTitle}>{players.length} IN THE ROOM</div>
               <div style={s.chipWrap}>
-                {players.map(p => <span key={p.name} style={s.playerChip}>{p.name}</span>)}
+                {players.map(p => <span key={p.name} style={s.playerChip}><Avatar id={avatars[p.name]} fallback={p.name} size={26} />{p.name}</span>)}
                 {players.length === 0 && <div style={s.dim}>Waiting for players to join…</div>}
               </div>
             </div>
@@ -144,6 +149,7 @@ export default function BigScreen({ gameId }) {
             {totals.map(([name, score], i) => (
               <div key={name} style={{ ...s.boardRow, fontSize: i === 0 ? '3.4vmin' : '2.8vmin' }}>
                 <span style={s.boardRank}>{['🏆', '🥈', '🥉'][i] || `#${i + 1}`}</span>
+                <Avatar id={avatars[name]} fallback={name} size={i === 0 ? 48 : 40} />
                 <span style={s.boardName}>{name}</span>
                 <span style={s.boardScore}>{score} pt{score !== 1 ? 's' : ''}</span>
               </div>
@@ -195,7 +201,7 @@ export default function BigScreen({ gameId }) {
               <div style={s.chipWrap}>
                 {players.map(p => {
                   const inYet = roundAnswers[p.name] != null
-                  return <span key={p.name} style={{ ...s.playerChip, opacity: inYet ? 1 : 0.4, background: inYet ? withAlpha(theme.primaryColor, 0.2) : withAlpha(theme.textColor, 0.06), borderColor: inYet ? theme.primaryColor : withAlpha(theme.textColor, 0.2) }}>{inYet ? '✓ ' : ''}{p.name}</span>
+                  return <span key={p.name} style={{ ...s.playerChip, opacity: inYet ? 1 : 0.4, background: inYet ? withAlpha(theme.primaryColor, 0.2) : withAlpha(theme.textColor, 0.06), borderColor: inYet ? theme.primaryColor : withAlpha(theme.textColor, 0.2) }}><Avatar id={avatars[p.name]} fallback={p.name} size={26} />{inYet ? '✓ ' : ''}{p.name}</span>
                 })}
               </div>
             </div>
@@ -220,9 +226,9 @@ function buildScreenStyles(theme) {
   return {
     page: { minHeight: '100vh', width: '100%', background: bg, position: 'relative', overflow: 'hidden', fontFamily: bodyFont },
     inner: { position: 'relative', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3vmin 4vmin', boxSizing: 'border-box' },
-    logo: { fontFamily: headingFont, fontWeight: 900, fontSize: '6vmin', letterSpacing: 2, color: text, textTransform: 'uppercase', textAlign: 'center' },
+    logo: { fontFamily: headingFont, fontWeight: 600, fontSize: '6vmin', color: text, textAlign: 'center' },
     logoImg: { maxWidth: '46vmin', maxHeight: '22vmin', objectFit: 'contain', display: 'block', margin: '0 auto' },
-    gameTitle: { fontFamily: headingFont, fontSize: '5vmin', fontWeight: 900, color: primary, textAlign: 'center', margin: '2vmin 0 4vmin' },
+    gameTitle: { fontFamily: headingFont, fontSize: '5vmin', fontWeight: 600, color: primary, textAlign: 'center', margin: '2vmin 0 4vmin' },
     lobbyRow: { display: 'flex', gap: '5vmin', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' },
     qrBox: { textAlign: 'center' },
     qrImg: { width: '34vmin', height: '34vmin', borderRadius: '2vmin', background: '#fff', padding: '1.5vmin', display: 'block' },
@@ -230,10 +236,10 @@ function buildScreenStyles(theme) {
     joinUrl: { fontSize: '2.4vmin', color: primary, fontWeight: 700, marginTop: '0.5vmin' },
     lobbyPlayers: { minWidth: '34vmin', maxWidth: '46vmin' },
     chipWrap: { display: 'flex', flexWrap: 'wrap', gap: '1.2vmin', justifyContent: 'center', marginTop: '2vmin' },
-    playerChip: { padding: '1vmin 2vmin', borderRadius: '4vmin', fontSize: '2.2vmin', fontWeight: 700, color: text, background: withAlpha(primary, 0.15), border: `1px solid ${withAlpha(primary, 0.4)}` },
+    playerChip: { display: 'inline-flex', alignItems: 'center', gap: '1vmin', padding: '0.8vmin 2vmin 0.8vmin 0.8vmin', borderRadius: '4vmin', fontSize: '2.2vmin', fontWeight: 700, color: text, background: withAlpha(primary, 0.15), border: `1px solid ${withAlpha(primary, 0.4)}` },
     dim: { color: withAlpha(text, 0.5), fontSize: '2.2vmin' },
     waiting: { textAlign: 'center', fontSize: '2.8vmin', color: withAlpha(text, 0.7), marginTop: '5vmin', letterSpacing: 1 },
-    finTitle: { fontFamily: headingFont, fontSize: '7vmin', fontWeight: 900, color: primary, textAlign: 'center', marginBottom: '4vmin', letterSpacing: 2 },
+    finTitle: { fontFamily: headingFont, fontSize: '7vmin', fontWeight: 600, color: primary, textAlign: 'center', marginBottom: '4vmin' },
 
     activeGrid: { display: 'flex', gap: '4vmin', width: '100%', alignItems: 'flex-start', flexWrap: 'wrap' },
     qColumn: { flex: '1 1 58%', minWidth: '50vmin' },
@@ -248,13 +254,13 @@ function buildScreenStyles(theme) {
     revealImg: { width: '100%', maxHeight: '40vmin', objectFit: 'contain', borderRadius: '2vmin', marginTop: '3vmin', display: 'block' },
 
     lockBox: { background: card, border: `1px solid ${withAlpha(text, 0.12)}`, borderRadius: '2.5vmin', padding: '3vmin', textAlign: 'center' },
-    lockCount: { fontFamily: headingFont, fontSize: '9vmin', fontWeight: 900, color: primary, lineHeight: 1 },
+    lockCount: { fontFamily: headingFont, fontSize: '9vmin', fontWeight: 600, color: primary, lineHeight: 1 },
     lockOf: { fontSize: '5vmin', color: withAlpha(text, 0.4) },
     lockLabel: { fontSize: '2.6vmin', letterSpacing: 2, color: withAlpha(text, 0.6), textTransform: 'uppercase', marginBottom: '2vmin' },
     lockTrack: { height: '1.6vmin', borderRadius: '1vmin', background: withAlpha(text, 0.12), overflow: 'hidden', marginBottom: '2vmin' },
     lockFill: { height: '100%', background: primary, borderRadius: '1vmin', transition: 'width 0.5s' },
     revealCallout: { background: card, border: `2px solid ${withAlpha(secondary, 0.5)}`, borderRadius: '2.5vmin', padding: '3vmin', textAlign: 'center', fontSize: '2.8vmin', color: withAlpha(text, 0.7) },
-    revealName: { fontFamily: headingFont, fontSize: '6vmin', fontWeight: 900, color: secondary, marginTop: '1vmin' },
+    revealName: { fontFamily: headingFont, fontSize: '6vmin', fontWeight: 600, color: secondary, marginTop: '1vmin' },
 
     board: { background: card, border: `1px solid ${withAlpha(text, 0.12)}`, borderRadius: '2.5vmin', padding: '2.5vmin 3vmin' },
     boardTitle: { fontSize: '2.2vmin', letterSpacing: 2, color: withAlpha(text, 0.55), fontWeight: 700, marginBottom: '2vmin', textTransform: 'uppercase' },

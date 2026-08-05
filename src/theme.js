@@ -16,13 +16,16 @@ export const DEFAULT_THEME = {
   tagline: BRAND_TAGLINE,
   questionLabel: 'WHO POSTED THIS?',
   welcomeMessage: '',
-  primaryColor: '#ffd166',
-  secondaryColor: '#00ff88',
-  backgroundColor: '#0a0a12',
-  cardColor: '#111120',
-  textColor: '#f0f0f0',
-  headingFont: "'Arial Black', sans-serif",
-  bodyFont: "'Courier New', monospace",
+  // Boutique "Field Notes" system: warm oat paper, sage lead, clay + honey
+  // warmth, ink text — rounded Fredoka display over friendly Nunito Sans.
+  primaryColor: '#4f6b50',   // sage — buttons, brand, the current pick
+  secondaryColor: '#5f8f6b', // leaf green — the correct answer / success
+  accentColor: '#c26742',    // clay — eyebrows, question card, letter badges
+  backgroundColor: '#ece4d2',// oat paper
+  cardColor: '#fffdf7',      // warm white
+  textColor: '#332f27',      // warm ink
+  headingFont: "'Fredoka', sans-serif",
+  bodyFont: "'Nunito Sans', sans-serif",
   backgroundImage: null,
   logoImage: null,
 }
@@ -31,6 +34,9 @@ export const DEFAULT_THEME = {
 // CSS2 URL) for fonts that aren't system fonts. `null` means it's a web-safe font
 // that needs no loading.
 export const FONT_OPTIONS = [
+  { label: 'Fredoka (Rounded Display)', value: "'Fredoka', sans-serif", google: 'Fredoka:wght@400;500;600;700' },
+  { label: 'Nunito Sans (Friendly Sans)', value: "'Nunito Sans', sans-serif", google: 'Nunito+Sans:wght@400;600;700;800' },
+  { label: 'Quicksand (Rounded, Lighter)', value: "'Quicksand', sans-serif", google: 'Quicksand:wght@400;500;600;700' },
   { label: 'Courier New (Retro Mono)', value: "'Courier New', monospace", google: null },
   { label: 'Arial Black (Bold Sans)', value: "'Arial Black', sans-serif", google: null },
   { label: 'Georgia (Classic Serif)', value: 'Georgia, serif', google: null },
@@ -43,74 +49,34 @@ export const FONT_OPTIONS = [
 
 export const THEME_PRESETS = [
   {
-    id: 'camp-bach',
-    label: 'Pink & Green Camp Bach',
-    emoji: '🏕️',
-    theme: {
-      primaryColor: '#ff6fae',
-      secondaryColor: '#7ed957',
-      backgroundColor: '#0f1f14',
-      cardColor: '#172b1c',
-      textColor: '#fff5f9',
-      headingFont: "'Pacifico', cursive",
-      bodyFont: "'Poppins', sans-serif",
-    },
+    id: 'sage',
+    label: 'Sage & Clay',
+    emoji: '🌿',
+    theme: { primaryColor: '#4f6b50', secondaryColor: '#5f8f6b', accentColor: '#c26742', backgroundColor: '#ece4d2', cardColor: '#fffdf7', textColor: '#332f27', headingFont: "'Fredoka', sans-serif", bodyFont: "'Nunito Sans', sans-serif" },
   },
   {
-    id: 'mountain-forest',
-    label: 'Mountain / Forest',
-    emoji: '🏔️',
-    theme: {
-      primaryColor: '#8fae5d',
-      secondaryColor: '#c98a4b',
-      backgroundColor: '#101710',
-      cardColor: '#1a231a',
-      textColor: '#eef2e6',
-      headingFont: "'Bebas Neue', sans-serif",
-      bodyFont: 'Georgia, serif',
-    },
+    id: 'terracotta',
+    label: 'Terracotta',
+    emoji: '🏺',
+    theme: { primaryColor: '#b85f3c', secondaryColor: '#6f8f5e', accentColor: '#d99a52', backgroundColor: '#f2e6d4', cardColor: '#fffdf7', textColor: '#3a2c22', headingFont: "'Fredoka', sans-serif", bodyFont: "'Nunito Sans', sans-serif" },
   },
   {
-    id: 'christmas',
-    label: 'Christmas',
-    emoji: '🎄',
-    theme: {
-      primaryColor: '#d4af37',
-      secondaryColor: '#2a9d5c',
-      backgroundColor: '#0b1410',
-      cardColor: '#132018',
-      textColor: '#fdf3e3',
-      headingFont: "'Playfair Display', serif",
-      bodyFont: 'Georgia, serif',
-    },
+    id: 'plum',
+    label: 'Plum & Rose',
+    emoji: '🍇',
+    theme: { primaryColor: '#8f5a73', secondaryColor: '#6f8f6a', accentColor: '#b06f86', backgroundColor: '#f0e7dd', cardColor: '#fffdf8', textColor: '#3a2e30', headingFont: "'Fredoka', sans-serif", bodyFont: "'Nunito Sans', sans-serif" },
   },
   {
-    id: 'birthday',
-    label: 'Birthday',
-    emoji: '🎂',
-    theme: {
-      primaryColor: '#ff5da2',
-      secondaryColor: '#ffcc00',
-      backgroundColor: '#1a1030',
-      cardColor: '#241a3d',
-      textColor: '#fff9f0',
-      headingFont: "'Pacifico', cursive",
-      bodyFont: "'Poppins', sans-serif",
-    },
+    id: 'forest',
+    label: 'Forest & Honey',
+    emoji: '🌲',
+    theme: { primaryColor: '#3f5742', secondaryColor: '#6f8f5e', accentColor: '#dca04a', backgroundColor: '#e9e3d1', cardColor: '#fdfaf1', textColor: '#2c2b22', headingFont: "'Fredoka', sans-serif", bodyFont: "'Nunito Sans', sans-serif" },
   },
   {
-    id: 'bachelorette',
-    label: 'Bachelorette',
-    emoji: '💍',
-    theme: {
-      primaryColor: '#d4af37',
-      secondaryColor: '#e8a0bf',
-      backgroundColor: '#150f14',
-      cardColor: '#201820',
-      textColor: '#f8ecec',
-      headingFont: "'Playfair Display', serif",
-      bodyFont: 'Georgia, serif',
-    },
+    id: 'dusk',
+    label: 'Dusk & Berry',
+    emoji: '🫐',
+    theme: { primaryColor: '#5b6b86', secondaryColor: '#6f8f6a', accentColor: '#b0617a', backgroundColor: '#e8e6dd', cardColor: '#fffef9', textColor: '#2e2f33', headingFont: "'Fredoka', sans-serif", bodyFont: "'Nunito Sans', sans-serif" },
   },
 ]
 
@@ -155,17 +121,20 @@ export const BRIDE_SAMPLE_QUESTIONS = [
 
 // Elegant bridal default theme (light/airy blush + gold on deep plum).
 // Every key is editable in the host's Colors/Fonts customizer.
+// Bride edition — same boutique bones, shifted to a warm plum + rose accent so
+// the two games read as siblings rather than strangers.
 export const BRIDE_THEME = {
   ...DEFAULT_THEME,
   tagline: 'How well do you know the bride?',
   questionLabel: 'WHAT DID SHE SAY?',
-  primaryColor: '#d8899b',
-  secondaryColor: '#c9a227',
-  backgroundColor: '#1a1220',
-  cardColor: '#241830',
-  textColor: '#f7ecf0',
-  headingFont: "'Playfair Display', serif",
-  bodyFont: 'Georgia, serif',
+  primaryColor: '#8f5a73',   // plum
+  secondaryColor: '#6f8f6a', // leaf green — success stays legible
+  accentColor: '#b06f86',    // rose
+  backgroundColor: '#f0e7dd',// warm blush cream
+  cardColor: '#fffdf8',
+  textColor: '#3a2e30',      // warm aubergine ink
+  headingFont: "'Fredoka', sans-serif",
+  bodyFont: "'Nunito Sans', sans-serif",
 }
 
 export const EDITIONS = {
