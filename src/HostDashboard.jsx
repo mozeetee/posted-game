@@ -168,21 +168,36 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     return () => { stopped = true; clearInterval(poll) }
   }, [screen, currentGame?.id, currentGame?.currentQuestion])
 
-  // Bride Edition: poll the survey tables while the host is setting up or
-  // managing the game, so "Awaiting bride… → Submitted (X/N)" updates live.
+  // Survey polling while the host is setting up or managing the game, so live
+  // status updates on its own. Bride Edition tracks one bride's single submit
+  // ("Awaiting bride… → Submitted (X/N)"). The Social Media edition's optional
+  // guest survey instead tracks how many posts have come in and from how many
+  // different guests (many people fill the same link). We only ever select
+  // `answer` here, never the (heavy) screenshot column.
   useEffect(() => {
-    if (currentGame?.edition !== 'bride') return
+    const ed = currentGame?.edition
+    const isBride = ed === 'bride'
+    const hasGuest = getEditionConfig(ed).hasGuestSurvey
+    if (!isBride && !hasGuest) return
     if (screen !== 'create' && screen !== 'manage') return
     const gameId = currentGame.id
     let stopped = false
     async function tick() {
-      const [meta, resp] = await Promise.all([
-        supabase.from('survey_meta').select('submitted').eq('game_id', gameId).maybeSingle(),
-        supabase.from('survey_responses').select('answer').eq('game_id', gameId),
-      ])
-      if (stopped) return
-      const count = (resp.data || []).filter(r => (r.answer || '').trim()).length
-      setSurveyStatus({ submitted: !!meta.data?.submitted, count })
+      if (isBride) {
+        const [meta, resp] = await Promise.all([
+          supabase.from('survey_meta').select('submitted').eq('game_id', gameId).maybeSingle(),
+          supabase.from('survey_responses').select('answer').eq('game_id', gameId),
+        ])
+        if (stopped) return
+        const count = (resp.data || []).filter(r => (r.answer || '').trim()).length
+        setSurveyStatus({ submitted: !!meta.data?.submitted, count })
+      } else {
+        const { data } = await supabase.from('survey_responses').select('answer').eq('game_id', gameId)
+        if (stopped) return
+        const rows = (data || []).filter(r => (r.answer || '').trim())
+        const contributors = new Set(rows.map(r => r.answer.trim().toLowerCase())).size
+        setSurveyStatus({ submitted: false, count: rows.length, posts: rows.length, contributors })
+      }
     }
     tick()
     const poll = setInterval(tick, 3000)
@@ -509,6 +524,21 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     try { await navigator.clipboard.writeText(getSurveyLink(game)); setSurveyCopied(true); setTimeout(() => setSurveyCopied(false), 2000) } catch {}
   }
 
+  // Social Media edition: the link the host texts to the whole group so each
+  // guest submits their OWN posts (shares the same surveyKey as the bride flow).
+  function getGuestSurveyLink(game) {
+    return `${window.location.origin}/?game=${game.id}&role=guest&key=${game.surveyKey || ''}`
+  }
+
+  async function copyGuestSurveyLink() {
+    let game = currentGame
+    if (!game.surveyKey) game = { ...game, surveyKey: generateHostKey() }
+    // Persist so the guests' link resolves to a real row even on a brand-new game.
+    await saveGame({ ...game, title: gameTitle })
+    setCurrentGame(game)
+    try { await navigator.clipboard.writeText(getGuestSurveyLink(game)); setSurveyCopied(true); setTimeout(() => setSurveyCopied(false), 2000) } catch {}
+  }
+
   // Pull the bride's submitted answers into the questions as the correct answer
   // (and first choice), so the host can add decoys and build the trivia.
   async function pullBrideAnswers() {
@@ -540,6 +570,45 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
       questions.push({ id: Date.now() + i, brideSurveyId: a.id, round: "Bride's Picks", post: a.prompt, brideAnswer: a.answer, author: a.answer, choices: shuffleArr(padChoices(a.answer ? [a.answer] : [])), questionImage: null, revealImage: null })
     })
     const updated = { ...currentGame, questions, surveyStatus: 'ready' }
+    setCurrentGame(updated)
+    await saveGame({ ...updated, title: gameTitle })
+    setPullingAnswers(false)
+    setActiveTab('questions')
+  }
+
+  // Social Media edition: pull the guests' submitted posts into the game. Each
+  // submission (name + post text and/or screenshot) becomes a "Who Posted This?"
+  // question where that guest is the correct answer, and every question's guess
+  // options auto-fill from the full roster of everyone who contributed. The host
+  // then puts on the final touches in the Questions tab. Idempotent — re-pulling
+  // only appends posts that came in since (tracked by guestSubmissionId).
+  async function pullGuestSubmissions() {
+    setPullingAnswers(true)
+    const { data } = await supabase.from('survey_responses').select('*').eq('game_id', currentGame.id)
+    const subs = (data || [])
+      .filter(r => (r.answer || '').trim() && ((r.prompt || '').trim() || r.image))
+      .map(r => ({ id: String(r.question_id), name: r.answer.trim(), text: (r.prompt || '').trim(), image: r.image || null }))
+    // Full roster of contributors (deduped, preserving first-seen order) — these
+    // become the shared guess options across every question.
+    const roster = []
+    subs.forEach(sub => { if (!roster.some(n => n.toLowerCase() === sub.name.toLowerCase())) roster.push(sub.name) })
+    const seen = new Set(currentGame.questions.map(q => q.guestSubmissionId).filter(Boolean))
+    const newQuestions = subs
+      .filter(sub => !seen.has(sub.id))
+      .map((sub, i) => ({
+        id: Date.now() + i,
+        guestSubmissionId: sub.id,
+        post: sub.text,
+        author: sub.name,
+        // Same roster on every question so the guessing stays consistent; shuffled
+        // so the author isn't always in the same spot. Host can trim per question.
+        choices: shuffleArr(roster.length ? [...roster] : [sub.name]),
+        questionImage: sub.image,
+        revealImage: null,
+        questionLabel: '',
+      }))
+    const questions = [...currentGame.questions, ...newQuestions]
+    const updated = { ...currentGame, questions }
     setCurrentGame(updated)
     await saveGame({ ...updated, title: gameTitle })
     setPullingAnswers(false)
@@ -756,6 +825,10 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   if (screen === 'create') {
     const theme = getTheme(currentGame)
     const isBride = currentGame.edition === 'bride'
+    // Social Media edition: an optional "Collect" tab where the host texts a
+    // survey link and guests submit their own posts (the host can still build
+    // every question by hand in the Questions tab — both options stay available).
+    const hasGuestSurvey = !isBride && getEditionConfig(currentGame.edition).hasGuestSurvey
     const isPublished = isHostMode || games.some(g => g.id === currentGame.id)
     const autosaveLabel = saving
       ? '● Saving…'
@@ -776,8 +849,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
           <button style={s.modeToggle} onClick={toggleDashMode} title="Toggle light/dark mode">{dashMode === 'dark' ? '☀️' : '🌙'}</button>
         </div>
         <div style={s.tabs}>
-          {(isBride ? ['survey', 'questions', 'customize', 'preview'] : ['questions', 'customize', 'preview']).map(t => {
-            const label = t === 'survey' ? 'SURVEY' : (t === 'questions' && isBride) ? 'BUILD TRIVIA' : t.toUpperCase()
+          {(isBride ? ['survey', 'questions', 'customize', 'preview'] : hasGuestSurvey ? ['questions', 'collect', 'customize', 'preview'] : ['questions', 'customize', 'preview']).map(t => {
+            const label = t === 'survey' ? 'SURVEY' : t === 'collect' ? 'COLLECT' : (t === 'questions' && isBride) ? 'BUILD TRIVIA' : t.toUpperCase()
             return <button key={t} style={{ ...s.tab, ...(activeTab === t ? s.tabOn : {}) }} onClick={() => setActiveTab(t)}>{label}</button>
           })}
         </div>
@@ -907,12 +980,55 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
           </>
         )}
 
+        {hasGuestSurvey && activeTab === 'collect' && (
+          <>
+            <div style={{ marginBottom: 20 }}>
+              <label style={s.label}>GAME TITLE</label>
+              <input style={s.input} placeholder="e.g. Sarah's Bachelorette Party 🎉" value={gameTitle} onChange={e => setGameTitle(e.target.value)} />
+            </div>
+
+            <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 20, lineHeight: 1.55 }}>
+              Don't want to dig up everyone's posts yourself? Text this link to the whole group. Each guest adds a few of their <strong>own</strong> posts — a caption, a hot take, a throwback screenshot — and it all lands here. You pull them in and put on the final touches. (Prefer to build it all yourself? Just use the <strong>Questions</strong> tab — both ways work.)
+            </div>
+
+            <div style={{ ...s.shareBox, borderColor: withAlpha(c.success, 0.3) }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 6 }}>📣 STEP 1 — SEND GUESTS THE LINK</div>
+              <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10, lineHeight: 1.5 }}>One link for everyone — text it, drop it in the group chat, or share it however you like. Guests just add their name and their posts.</div>
+              {currentGame.surveyKey && <div style={{ fontSize: 11, color: c.textMuted, wordBreak: 'break-all', marginBottom: 10, lineHeight: 1.5 }}>{getGuestSurveyLink(currentGame)}</div>}
+              <button style={{ ...s.copyBtn, background: c.success, color: c.successText }} onClick={copyGuestSurveyLink}>{surveyCopied ? '✓ Copied!' : 'Copy Guest Survey Link'}</button>
+            </div>
+
+            <div style={{ ...s.shareBox, borderColor: withAlpha((surveyStatus.posts > 0) ? c.success : c.accent, 0.3) }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: (surveyStatus.posts > 0) ? c.success : c.accent, marginBottom: 6 }}>📥 STEP 2 — WHAT'S COME IN</div>
+              {surveyStatus.posts > 0 ? (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: c.success, marginBottom: 6 }}>✓ {surveyStatus.posts} {surveyStatus.posts === 1 ? 'post' : 'posts'} from {surveyStatus.contributors} {surveyStatus.contributors === 1 ? 'guest' : 'guests'}</div>
+                  <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 12 }}>Pull them into the game — each becomes a "Who Posted This?" question, with the guess options filled in from everyone who contributed. You can keep pulling as more come in.</div>
+                  <button style={{ ...s.bigBtn, background: c.success, color: c.successText, opacity: pullingAnswers ? 0.6 : 1 }} disabled={pullingAnswers} onClick={pullGuestSubmissions}>{pullingAnswers ? 'Loading…' : '→ Pull posts into the game'}</button>
+                </>
+              ) : (
+                <div style={{ fontSize: 13, color: c.textMuted }}>
+                  ⏳ No posts yet — this updates on its own as guests submit.
+                  <div style={{ fontSize: 11, color: c.textFaint, marginTop: 6 }}>Leave this open or check back later. Then pull them in and polish in the Questions tab.</div>
+                </div>
+              )}
+            </div>
+
+            <button style={{ ...s.bigBtn, opacity: (!gameTitle.trim()) ? 0.4 : 1, marginTop: 8 }} onClick={goToManage} disabled={!gameTitle.trim()}>Go to Share &amp; Manage →</button>
+          </>
+        )}
+
         {activeTab === 'questions' && !isBride && (
           <>
             <div style={{ marginBottom: 20 }}>
               <label style={s.label}>GAME TITLE</label>
               <input style={s.input} placeholder="e.g. Sarah's Bachelorette Party 🎉" value={gameTitle} onChange={e => setGameTitle(e.target.value)} />
             </div>
+            {hasGuestSurvey && (
+              <div style={{ fontSize: 12, color: c.accent, background: withAlpha(c.accent, 0.07), border: `1px solid ${withAlpha(c.accent, 0.2)}`, borderRadius: 6, padding: '12px 14px', marginBottom: 16, lineHeight: 1.5 }}>
+                💡 Don't want to source every post yourself? Open the <button style={{ background: 'none', border: 'none', padding: 0, color: c.accent, fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', fontFamily: 'inherit', fontSize: 'inherit' }} onClick={() => setActiveTab('collect')}>Collect</button> tab to text guests a survey and have them add their own.
+              </div>
+            )}
             <div style={s.section}>
               <h2 style={s.sectionTitle}>QUESTIONS ({currentGame.questions.length})</h2>
               {currentGame.questions.map((q, i) => (
@@ -1143,6 +1259,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   // ── MANAGE ────────────────────────────────────────────────────────────────
   if (screen === 'manage' && currentGame) {
     const isBride = currentGame.edition === 'bride'
+    const hasGuestSurvey = !isBride && getEditionConfig(currentGame.edition).hasGuestSurvey
     const scores = computeScores()
     const personStats = isBride ? [] : computePersonStats(currentGame)
     const maxCorrect = Math.max(1, ...personStats.map(([, st]) => st.correct))
@@ -1201,6 +1318,20 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               </div>
             </div>
           )}
+          {hasGuestSurvey && (
+            <div style={{ ...s.shareBox, borderColor: withAlpha((surveyStatus.posts > 0) ? c.success : c.accent, 0.3) }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: (surveyStatus.posts > 0) ? c.success : c.accent, marginBottom: 6 }}>📣 COLLECT FROM GUESTS</div>
+              {surveyStatus.posts > 0 ? (
+                <div style={{ fontSize: 13, color: c.success, fontWeight: 700, marginBottom: 10 }}>✓ {surveyStatus.posts} {surveyStatus.posts === 1 ? 'post' : 'posts'} in from {surveyStatus.contributors} {surveyStatus.contributors === 1 ? 'guest' : 'guests'}</div>
+              ) : (
+                <div style={{ fontSize: 13, color: c.textMuted, marginBottom: 10 }}>⏳ Text guests the link and their posts will show up here.</div>
+              )}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button style={s.copyBtn} onClick={copyGuestSurveyLink}>{surveyCopied ? '✓ Copied!' : 'Copy Guest Survey Link'}</button>
+                {surveyStatus.posts > 0 && <button style={{ ...s.copyBtn, background: c.success, color: c.successText, opacity: pullingAnswers ? 0.6 : 1 }} disabled={pullingAnswers} onClick={pullGuestSubmissions}>{pullingAnswers ? 'Loading…' : '↻ Pull posts in'}</button>}
+              </div>
+            </div>
+          )}
           <div style={{ ...s.shareBox, borderColor: withAlpha(c.success, 0.3) }}>
             <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 6 }}>📺 BIG SCREEN — CAST TO A TV</div>
             <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10, lineHeight: 1.5 }}>A shared view for the room: the question, live "locked in" counter, the reveal, and the leaderboard. Open it on a laptop plugged into a TV, or cast the browser tab. It follows along automatically — no clicking needed.</div>
@@ -1211,6 +1342,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
           </div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
             {isBride && <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('survey'); setScreen('create') }}>💌 Survey</button>}
+            {hasGuestSurvey && <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('collect'); setScreen('create') }}>📣 Collect</button>}
             <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('questions'); setScreen('create') }}>✎ {isBride ? 'Build Trivia' : 'Edit Questions'}</button>
             <button style={s.editBtn} onClick={() => { setGameTitle(currentGame.title); setActiveTab('customize'); setScreen('create') }}>🎨 Customize Theme</button>
           </div>

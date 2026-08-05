@@ -177,6 +177,10 @@ export const EDITIONS = {
     defaultTheme: DEFAULT_THEME,
     sampleQuestions: POSTED_SAMPLE_QUESTIONS,
     hasSurvey: false,
+    // Optional: the host can text a survey link to the group so each guest
+    // digs up and submits their OWN posts, instead of the host sourcing them
+    // all. The host still keeps the build-it-yourself flow. See GuestSurvey.jsx.
+    hasGuestSurvey: true,
   },
   bride: {
     id: 'bride',
