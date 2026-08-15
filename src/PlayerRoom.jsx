@@ -371,7 +371,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
 
         <div style={{ ...p.field, marginTop: 14 }}>
           <label style={p.label}>Your name</label>
-          <input style={p.input} placeholder="How should we call you?" value={playerName} onChange={e => setPlayerName(e.target.value)} onKeyDown={e => e.key === 'Enter' && joinGame()} autoFocus />
+          <input style={p.input} placeholder="What should we call you?" value={playerName} onChange={e => setPlayerName(e.target.value)} onKeyDown={e => e.key === 'Enter' && joinGame()} autoFocus />
         </div>
         {error && <div style={p.err}>{error}</div>}
         <button style={p.joinBtn} onClick={joinGame}>Join the game →</button>
