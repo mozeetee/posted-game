@@ -6,6 +6,9 @@ import PlayerRoom from './PlayerRoom'
 import BigScreen from './BigScreen'
 import BrideSurvey from './BrideSurvey'
 import GuestSurvey from './GuestSurvey'
+import BuzzerTV from './buzzer/BuzzerTV'
+import BuzzerHost from './buzzer/BuzzerHost'
+import BuzzerPlayer from './buzzer/BuzzerPlayer'
 
 // Read the query string defensively. Links we share (host/player/screen/bride)
 // all separate params with "&", and email/messaging/notes apps sometimes mangle
@@ -28,6 +31,15 @@ function App() {
   const params = getParams()
   const role = params.get('role')
   const gameId = params.get('game')
+
+  // Buzzer edition (three screens). Its links carry &gt=buzzer so we route to
+  // the game-show views: role=tv (cast display), role=host (controller +&key),
+  // role=player (each phone's buzzer, the default).
+  if (params.get('gt') === 'buzzer' && gameId) {
+    if (role === 'tv') return <BuzzerTV gameId={gameId} />
+    if (role === 'host') return <BuzzerHost gameId={gameId} hostKey={params.get('key') || ''} />
+    return <BuzzerPlayer gameId={gameId} />
+  }
 
   // If URL has ?game=XXX&role=player → show player view
   // Optional &name=Sarah pre-fills the guest's name on the join screen
