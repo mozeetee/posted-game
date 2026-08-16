@@ -157,7 +157,7 @@ export default function BrideSurvey({ gameId, surveyKey = '' }) {
     return (
       <Page theme={theme}>
         <div style={{ ...s.card, textAlign: 'center' }}>
-          <div style={{ fontSize: 52, marginBottom: 14 }}>💍</div>
+          <div style={{ fontSize: 52, marginBottom: 14 }}>🎉</div>
           <div style={s.h1}>All done!</div>
           <div style={{ ...s.muted, marginBottom: 24 }}>Your answers are saved. The host has been notified and will build the game from here. You can close this page — or give your host a heads up that you're finished. 🎉</div>
           <button style={s.ghostBtn} onClick={() => setStatus('form')}>Review or edit my answers</button>
@@ -179,10 +179,10 @@ export default function BrideSurvey({ gameId, surveyKey = '' }) {
   return (
     <Page theme={theme}>
       <div style={s.card}>
-        <div style={s.eyebrow}>{game.title || "That's So Them"} · Bride Survey</div>
-        <div style={s.h1}>Tell us about you 💌</div>
+        <div style={s.eyebrow}>{game.title || "That's So Them"} · Survey</div>
+        <div style={s.h1}>Tell us about you 🎉</div>
         <div style={{ ...s.muted, marginBottom: 22 }}>
-          Fill in your real answers below — your friends will try to guess them at the party. No wrong answers here! Everything saves automatically as you type. Not into a question? Just tap <strong>Pass</strong>.
+          Fill in your real answers below, and your friends will try to guess them at the party. No wrong answers here! Everything saves automatically as you type. Not into a question? Just tap <strong>Pass</strong>.
         </div>
 
         {rounds.map((round, ri) => (

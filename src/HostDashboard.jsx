@@ -867,39 +867,39 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
           <>
             <div style={{ marginBottom: 20 }}>
               <label style={s.label}>GAME TITLE</label>
-              <input style={s.input} placeholder="e.g. Sarah's Bridal Shower 💍" value={gameTitle} onChange={e => setGameTitle(e.target.value)} />
+              <input style={s.input} placeholder="e.g. Sarah's Bridal Shower 🎉" value={gameTitle} onChange={e => setGameTitle(e.target.value)} />
             </div>
             <div style={{ marginBottom: 20 }}>
-              <label style={s.label}>BRIDE'S NAME</label>
+              <label style={s.label}>GUEST OF HONOR'S NAME</label>
               <input style={s.input} placeholder="e.g. Sarah" value={currentGame.brideName || ''} onChange={e => setCurrentGame(g => ({ ...g, brideName: e.target.value }))} />
             </div>
 
             <div style={{ ...s.shareBox, borderColor: withAlpha(c.success, 0.3) }}>
-              <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 6 }}>💌 STEP 1 — SEND THE BRIDE HER SURVEY</div>
-              <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10, lineHeight: 1.5 }}>Tweak the questions below first if you like, then send this private link to the bride. She fills in her real answers — the guesses come later.</div>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: c.success, marginBottom: 6 }}>💌 STEP 1 — SEND THEM THE SURVEY</div>
+              <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10, lineHeight: 1.5 }}>Tweak the questions below first if you like, then send this private link to your guest of honor. They fill in their real answers, and the guesses come later.</div>
               {currentGame.surveyKey && <div style={{ fontSize: 11, color: c.textMuted, wordBreak: 'break-all', marginBottom: 10, lineHeight: 1.5 }}>{getSurveyLink(currentGame)}</div>}
-              <button style={{ ...s.copyBtn, background: c.success, color: c.successText }} onClick={copySurveyLink}>{surveyCopied ? '✓ Copied!' : 'Copy Bride Survey Link'}</button>
+              <button style={{ ...s.copyBtn, background: c.success, color: c.successText }} onClick={copySurveyLink}>{surveyCopied ? '✓ Copied!' : 'Copy Survey Link'}</button>
             </div>
 
             <div style={{ ...s.shareBox, borderColor: withAlpha(surveyStatus.submitted ? c.success : c.accent, 0.3) }}>
-              <div style={{ fontSize: 10, letterSpacing: 2, color: surveyStatus.submitted ? c.success : c.accent, marginBottom: 6 }}>📥 STEP 2 — HER ANSWERS</div>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: surveyStatus.submitted ? c.success : c.accent, marginBottom: 6 }}>📥 STEP 2 — THEIR ANSWERS</div>
               {surveyStatus.submitted ? (
                 <>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: c.success, marginBottom: 6 }}>✓ {currentGame.brideName || 'The bride'} submitted her answers!</div>
-                  <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 12 }}>{surveyStatus.count} of {currentGame.questions.length} answered. Pull them in to build the trivia — you'll add the wrong-answer choices.</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: c.success, marginBottom: 6 }}>✓ {currentGame.brideName || 'Your guest of honor'} submitted their answers!</div>
+                  <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 12 }}>{surveyStatus.count} of {currentGame.questions.length} answered. Pull them in to build the trivia, and you'll add the wrong-answer choices.</div>
                   <button style={{ ...s.bigBtn, background: c.success, color: c.successText, opacity: pullingAnswers ? 0.6 : 1 }} disabled={pullingAnswers} onClick={pullBrideAnswers}>{pullingAnswers ? 'Loading…' : '→ Build the Trivia'}</button>
                 </>
               ) : (
                 <div style={{ fontSize: 13, color: c.textMuted }}>
-                  ⏳ Awaiting the bride…{surveyStatus.count > 0 && <span style={{ color: c.accent }}> ({surveyStatus.count} answered so far)</span>}
-                  <div style={{ fontSize: 11, color: c.textFaint, marginTop: 6 }}>This updates automatically when she submits — leave this open or check back later.</div>
+                  ⏳ Awaiting their answers…{surveyStatus.count > 0 && <span style={{ color: c.accent }}> ({surveyStatus.count} answered so far)</span>}
+                  <div style={{ fontSize: 11, color: c.textFaint, marginTop: 6 }}>This updates automatically when they submit. Leave this open or check back later.</div>
                 </div>
               )}
             </div>
 
             <div style={s.section}>
               <h2 style={s.sectionTitle}>SURVEY QUESTIONS ({currentGame.questions.length})</h2>
-              <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 16, lineHeight: 1.5 }}>These are what the bride answers. Reword, remove, or add your own. Rounds group them for her.</div>
+              <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 16, lineHeight: 1.5 }}>These are what your guest of honor answers. Reword, remove, or add your own. Rounds just group them into sections.</div>
               {currentGame.questions.map((q, i) => (
                 <div key={q.id} style={s.qRow}>
                   <div style={s.qNum}>{q.round ? q.round : `Q${i + 1}`}</div>
@@ -924,11 +924,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
             <div style={s.section}>
               <h2 style={s.sectionTitle}>BUILD THE TRIVIA</h2>
               <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 16, lineHeight: 1.55 }}>
-                Mark the correct answer with the ○ button, then fill in believable <strong>wrong</strong> answers. Edit any answer's wording (e.g. change "I" to "her"), drag the order with ▲▼ or tap <strong>Shuffle</strong> so the right answer isn't always first. Only need 2 or 3 options? Just leave the extra answers blank or remove them with ✕. Filling it out together with the bride in person? Just type her answers here.
+                Mark the correct answer with the ○ button, then fill in believable <strong>wrong</strong> answers. Edit any answer's wording (e.g. change "I" to "they"), drag the order with ▲▼ or tap <strong>Shuffle</strong> so the right answer isn't always first. Only need 2 or 3 options? Just leave the extra answers blank or remove them with ✕. Filling it out together with your guest of honor in person? Just type their answers here.
               </div>
               {!surveyStatus.submitted && currentGame.questions.every(q => !q.brideAnswer) && (
                 <div style={{ fontSize: 12, color: c.accent, background: withAlpha(c.accent, 0.07), border: `1px solid ${withAlpha(c.accent, 0.2)}`, borderRadius: 6, padding: '12px 14px', marginBottom: 16 }}>
-                  The bride hasn't submitted her survey yet — but you can fill her answers in right here (great for doing it together in person), or send her the link from the <strong>Survey</strong> tab.
+                  Your guest of honor hasn't submitted their survey yet, but you can fill their answers in right here (great for doing it together in person), or send them the link from the <strong>Survey</strong> tab.
                 </div>
               )}
               {currentGame.questions.map((q, i) => {
@@ -946,8 +946,8 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                       </div>
                       <button style={s.x} onClick={() => removeQuestion(q.id)} title="Remove question">✕</button>
                     </div>
-                    {q.brideSurveyId && <span style={{ ...chip(c.success), alignSelf: 'flex-start' }}>💡 the bride's own question</span>}
-                    {q.passedByBride && !correctSet && <span style={{ ...chip(c.accent), alignSelf: 'flex-start' }}>⤼ she passed — fill it in or remove it</span>}
+                    {q.brideSurveyId && <span style={{ ...chip(c.success), alignSelf: 'flex-start' }}>💡 their own question</span>}
+                    {q.passedByBride && !correctSet && <span style={{ ...chip(c.accent), alignSelf: 'flex-start' }}>⤼ they passed, fill it in or remove it</span>}
 
                     {choices.map((ch, idx) => {
                       const isCorrect = ch !== '' && ch === q.author
@@ -1314,14 +1314,14 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
           </div>
           {isBride && (
             <div style={{ ...s.shareBox, borderColor: withAlpha(surveyStatus.submitted ? c.success : c.accent, 0.3) }}>
-              <div style={{ fontSize: 10, letterSpacing: 2, color: surveyStatus.submitted ? c.success : c.accent, marginBottom: 6 }}>💌 BRIDE SURVEY</div>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: surveyStatus.submitted ? c.success : c.accent, marginBottom: 6 }}>💌 SURVEY</div>
               {surveyStatus.submitted ? (
-                <div style={{ fontSize: 13, color: c.success, fontWeight: 700, marginBottom: 10 }}>✓ {currentGame.brideName || 'The bride'} submitted her answers ({surveyStatus.count}/{currentGame.questions.length})</div>
+                <div style={{ fontSize: 13, color: c.success, fontWeight: 700, marginBottom: 10 }}>✓ {currentGame.brideName || 'Your guest of honor'} submitted their answers ({surveyStatus.count}/{currentGame.questions.length})</div>
               ) : (
-                <div style={{ fontSize: 13, color: c.textMuted, marginBottom: 10 }}>⏳ Awaiting the bride…{surveyStatus.count > 0 && ` (${surveyStatus.count} answered)`}</div>
+                <div style={{ fontSize: 13, color: c.textMuted, marginBottom: 10 }}>⏳ Awaiting their answers…{surveyStatus.count > 0 && ` (${surveyStatus.count} answered)`}</div>
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button style={s.copyBtn} onClick={copySurveyLink}>{surveyCopied ? '✓ Copied!' : 'Copy Bride Survey Link'}</button>
+                <button style={s.copyBtn} onClick={copySurveyLink}>{surveyCopied ? '✓ Copied!' : 'Copy Survey Link'}</button>
                 {surveyStatus.submitted && <button style={{ ...s.copyBtn, background: c.success, color: c.successText, opacity: pullingAnswers ? 0.6 : 1 }} disabled={pullingAnswers} onClick={pullBrideAnswers}>{pullingAnswers ? 'Loading…' : '↻ Pull in her answers'}</button>}
               </div>
             </div>
