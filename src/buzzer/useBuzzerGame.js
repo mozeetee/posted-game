@@ -65,21 +65,24 @@ export function useBuzzerGame({ gameId, role, hostKey = '', playerId = '', playe
         { p_game: gameId, p_name: name, p_team: team || null, p_avatar: avatar || null })
       return data // { player_id, player_key }
     },
-    pick: (cat, idx) => supabase.rpc('buzzer_pick',
+    // NB: supabase-js query builders are lazy — they only dispatch when awaited
+    // (or .then()'d). These handlers are wired to onClick and their return value
+    // is discarded, so each MUST await internally or the request never fires.
+    pick: async (cat, idx) => { await supabase.rpc('buzzer_pick',
       { p_game: gameId, p_actor: role === 'host' ? 'host' : playerId,
-        p_key: role === 'host' ? hostKey : playerKey, p_cat: cat, p_idx: idx }),
+        p_key: role === 'host' ? hostKey : playerKey, p_cat: cat, p_idx: idx }) },
     buzz: async () => {
       const { data } = await supabase.rpc('buzzer_buzz',
         { p_game: gameId, p_player: playerId, p_key: playerKey })
       return data === true
     },
-    assignDD: (pid) => supabase.rpc('buzzer_assign_dd', { p_game: gameId, p_key: hostKey, p_player: pid }),
-    wager: (amount) => supabase.rpc('buzzer_wager',
-      { p_game: gameId, p_player: playerId, p_key: playerKey, p_amount: amount }),
-    judge: (correct) => supabase.rpc('buzzer_judge', { p_game: gameId, p_key: hostKey, p_correct: correct }),
-    pass: () => supabase.rpc('buzzer_pass', { p_game: gameId, p_key: hostKey }),
-    next: () => supabase.rpc('buzzer_next', { p_game: gameId, p_key: hostKey }),
-    reset: () => supabase.rpc('buzzer_reset', { p_game: gameId, p_key: hostKey }),
+    assignDD: async (pid) => { await supabase.rpc('buzzer_assign_dd', { p_game: gameId, p_key: hostKey, p_player: pid }) },
+    wager: async (amount) => { await supabase.rpc('buzzer_wager',
+      { p_game: gameId, p_player: playerId, p_key: playerKey, p_amount: amount }) },
+    judge: async (correct) => { await supabase.rpc('buzzer_judge', { p_game: gameId, p_key: hostKey, p_correct: correct }) },
+    pass: async () => { await supabase.rpc('buzzer_pass', { p_game: gameId, p_key: hostKey }) },
+    next: async () => { await supabase.rpc('buzzer_next', { p_game: gameId, p_key: hostKey }) },
+    reset: async () => { await supabase.rpc('buzzer_reset', { p_game: gameId, p_key: hostKey }) },
   }
 
   return { config, state, players, ready, notFound, actions, refetchState, refetchPlayers }

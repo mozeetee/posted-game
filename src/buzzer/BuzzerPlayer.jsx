@@ -16,6 +16,18 @@ export default function BuzzerPlayer({ gameId }) {
     gameId, role: 'player', playerId: me?.player_id, playerKey: me?.player_key,
   })
 
+  // The lockout ends at a wall-clock time (open_at), not on a state change, so
+  // schedule a re-render for that moment — otherwise the buzzer stays "Get
+  // ready…" until the next realtime update.
+  const [, forceTick] = useState(0)
+  useEffect(() => {
+    if (state?.phase !== 'reading' || !state.open_at) return
+    const ms = new Date(state.open_at).getTime() - Date.now()
+    if (ms <= 0) return
+    const t = setTimeout(() => forceTick(n => n + 1), ms + 40)
+    return () => clearTimeout(t)
+  }, [state?.phase, state?.open_at])
+
   if (notFound) return <Screen bg={BZ.paper}><Muted>That link isn’t a buzzer game.</Muted></Screen>
   if (!config || !state) return <Screen bg={BZ.paper}><Muted>Loading…</Muted></Screen>
   if (!me) return <Join actions={actions} gameId={gameId} onJoined={setMe} />
