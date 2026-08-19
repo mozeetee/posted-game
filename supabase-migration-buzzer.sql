@@ -17,8 +17,12 @@
 create table if not exists buzzer_state (
   game_id     text primary key references games(game_id) on delete cascade,
   phase       text not null default 'select',
-              -- select | reading | open | buzzed | dd_assign | dd_wager
-              -- | dd_answer | reveal | over
+              -- select   : board up, controller picks a clue
+              -- reading  : clue live; buzzers unlock once open_at passes
+              -- buzzed   : someone claimed it; host judges
+              -- dd_assign/dd_wager/dd_answer : Daily Double flow
+              -- reveal   : answer shown, then host advances
+              -- over     : board cleared
   control     text not null default 'host',   -- 'host' or a player_id
   cur_cat     int,
   cur_idx     int,
@@ -164,12 +168,12 @@ declare st buzzer_state;
 begin
   if not _buzzer_is_player(p_game, p_player, p_key) then return false; end if;
   select * into st from buzzer_state where game_id = p_game;
-  if st.phase <> 'open' then return false; end if;           -- not open (or still in lockout)
+  if st.phase <> 'reading' then return false; end if;         -- clue not live
   if clock_timestamp() < st.open_at then return false; end if; -- buzzed during lockout
   if st.missed @> to_jsonb(p_player) then return false; end if; -- already missed this clue
 
   update buzzer_state set winner = p_player, phase = 'buzzed', updated_at = now()
-    where game_id = p_game and phase = 'open' and winner is null;
+    where game_id = p_game and phase = 'reading' and winner is null;
 
   if found then
     insert into buzz_events (game_id, seq, player_id) values (p_game, st.seq, p_player);
@@ -253,9 +257,9 @@ begin
       where game_id = p_game;
     else
       update buzzer_state set
-        missed = missed || to_jsonb(st.winner), winner = null, phase = 'open',
+        missed = missed || to_jsonb(st.winner), winner = null, phase = 'reading',
         open_at = now(), seq = seq + 1, updated_at = now()
-      where game_id = p_game;   -- reopen for everyone else
+      where game_id = p_game;   -- reopen for everyone else (no lockout on a reopen)
     end if;
   end if;
 end $$;
@@ -268,7 +272,7 @@ declare st buzzer_state; clue jsonb; k text;
 begin
   if not _buzzer_is_host(p_game, p_key) then raise exception 'host only'; end if;
   select * into st from buzzer_state where game_id = p_game for update;
-  if st.phase not in ('open','reading') then return; end if;
+  if st.phase <> 'reading' then return; end if;
   select data->'board'->'categories'->st.cur_cat->'clues'->st.cur_idx
     into clue from games where game_id = p_game;
   k := st.cur_cat || '-' || st.cur_idx;
@@ -314,3 +318,12 @@ begin
     dd_player = null, dd_wager = null, reveal = null, updated_at = now()
   where game_id = p_game;
 end $$;
+
+-- ── Ensure a state row exists when the host creates a buzzer game (so the TV
+-- and host controller work before any player has joined). Harmless if it runs
+-- twice; exposes no secrets.
+create or replace function buzzer_init(p_game text)
+returns void language sql security definer as $$
+  insert into buzzer_state (game_id) values (p_game) on conflict (game_id) do nothing;
+$$;
+grant execute on function buzzer_init(text) to anon, authenticated;

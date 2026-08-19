@@ -5,6 +5,7 @@ import { compressImage, readFileAsDataUrl } from './ImageUpload'
 import { DEFAULT_THEME, THEME_PRESETS, FONT_OPTIONS, getTheme, ensureGoogleFont, withAlpha, contrastColor, BRAND_NAME, BRAND_TAGLINE, EDITIONS, getEditionConfig, getBrandParts } from './theme'
 import PlayerRoom from './PlayerRoom'
 import { Avatar } from './Avatar'
+import { DEFAULT_BOARD } from './buzzer/board'
 
 const DASH_MODE_KEY = 'wpt_dash_mode'
 
@@ -348,6 +349,26 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
     setShowEditionPicker(false)
     setScreen('create')
     setActiveTab(edition === 'bride' ? 'survey' : 'questions')
+  }
+
+  // Buzzer edition is a different beast (three screens, a pre-filled board, live
+  // state in its own tables). Create it straight into the DB, seed its state
+  // row, and jump to the share screen — there's no questions editor for it yet.
+  async function startBuzzerGame() {
+    const id = generateGameId()
+    const data = {
+      id, title: 'Buzzed In game', hostKey: generateHostKey(), edition: 'buzzer',
+      gameType: 'buzzer', board: DEFAULT_BOARD, settings: { lockoutMs: 1000 },
+      status: 'lobby', createdAt: Date.now(),
+    }
+    const { error } = await supabase.from('games').insert({ game_id: id, data })
+    if (error) { setSaveError(error.message); return }
+    await supabase.rpc('buzzer_init', { p_game: id })
+    setShowEditionPicker(false)
+    setCurrentGame(data)
+    setGameTitle(data.title)
+    setScreen('manage')
+    loadGames()
   }
 
   async function startMockPreview(fromScreen) {
@@ -782,7 +803,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
             <h2 style={{ ...s.sectionTitle, marginBottom: 12 }}>CHOOSE AN EDITION</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {Object.values(EDITIONS).map(ed => (
-                <button key={ed.id} style={{ display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 14, padding: '14px 16px', cursor: 'pointer', color: c.text, fontFamily: "'Nunito Sans', sans-serif" }} onClick={() => startNewGame(ed.id)}>
+                <button key={ed.id} style={{ display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 14, padding: '14px 16px', cursor: 'pointer', color: c.text, fontFamily: "'Nunito Sans', sans-serif" }} onClick={() => ed.id === 'buzzer' ? startBuzzerGame() : startNewGame(ed.id)}>
                   <span style={{ fontSize: 26 }}>{ed.emoji}</span>
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                     <span style={{ fontWeight: 800, fontSize: 15 }}>{ed.label}</span>
@@ -1265,6 +1286,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   }
 
   // ── MANAGE ────────────────────────────────────────────────────────────────
+  if (screen === 'manage' && currentGame && currentGame.gameType === 'buzzer') {
+    return <BuzzerManage game={currentGame} s={s} c={c} isHostMode={isHostMode}
+      onHome={() => setScreen('home')} onToggleMode={toggleDashMode} dashMode={dashMode} />
+  }
+
   if (screen === 'manage' && currentGame) {
     const isBride = currentGame.edition === 'bride'
     const hasGuestSurvey = !isBride && getEditionConfig(currentGame.edition).hasGuestSurvey
@@ -1645,4 +1671,42 @@ function buildDashTheme(mode, edition) {
     revealModeBtnOn: { background: withAlpha(c.accent, 0.13), color: c.accent, border: `1px solid ${withAlpha(c.accent, 0.4)}` },
   }
   return { s, c }
+}
+
+// Share screen for a buzzer game — three links (TV / host / player) instead of
+// the questions-based manage view. The board is pre-filled; a board editor can
+// come later.
+function BuzzerManage({ game, s, c, isHostMode, onHome, onToggleMode, dashMode }) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const links = [
+    { key: 'tv', label: 'CAST TO THE TV', hint: 'Open on the TV (or a laptop plugged into it). Display only — no controls.', url: `${origin}/?game=${game.id}&gt=buzzer&role=tv`, open: true },
+    { key: 'host', label: 'HOST CONTROLLER — FOR YOU', hint: 'Your private controller: reveal clues, judge answers, keep the game moving.', url: `${origin}/?game=${game.id}&gt=buzzer&role=host&key=${game.hostKey || ''}`, open: true },
+    { key: 'player', label: "PLAYERS' BUZZERS", hint: 'Send this to every guest — their phone becomes their buzzer.', url: `${origin}/?game=${game.id}&gt=buzzer`, open: false },
+  ]
+  const [copied, setCopied] = useState('')
+  const copy = async (k, url) => { try { await navigator.clipboard.writeText(url); setCopied(k); setTimeout(() => setCopied(''), 1600) } catch {} }
+  return (
+    <div style={s.page}><div style={s.container}>
+      <div style={s.topBar}>
+        {isHostMode ? <div style={{ ...s.step, color: c.accent }}>YOU'RE THE HOST</div> : <button style={s.back} onClick={onHome}>← Home</button>}
+        <div style={s.step}>{game.title}</div>
+        <button style={s.modeToggle} onClick={onToggleMode} title="Toggle light/dark mode">{dashMode === 'dark' ? '☀️' : '🌙'}</button>
+      </div>
+      <div style={{ ...s.shareBox, marginBottom: 16 }}>
+        <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 600, fontSize: 20, color: c.text, marginBottom: 4 }}>📣 Buzzed In — game show</div>
+        <div style={{ fontSize: 13, color: c.textMuted, lineHeight: 1.5 }}>Your board comes pre-filled with 30 clues. Open the three links below to play: the TV for the room, your controller, and a buzzer link for every guest.</div>
+      </div>
+      {links.map(l => (
+        <div key={l.key} style={{ ...s.shareBox, marginBottom: 14 }}>
+          <div style={{ fontSize: 10, letterSpacing: 2, color: c.accent, marginBottom: 6 }}>{l.label}</div>
+          <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 8 }}>{l.hint}</div>
+          <div style={{ fontSize: 12, color: c.textMuted, wordBreak: 'break-all', marginBottom: 10, lineHeight: 1.5 }}>{l.url}</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={s.copyBtn} onClick={() => copy(l.key, l.url)}>{copied === l.key ? '✓ Copied!' : 'Copy Link'}</button>
+            {l.open && <button style={{ ...s.copyBtn, background: c.success, color: c.successText }} onClick={() => window.open(l.url, '_blank')}>Open ↗</button>}
+          </div>
+        </div>
+      ))}
+    </div></div>
+  )
 }
