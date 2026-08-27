@@ -164,6 +164,17 @@ export const EDITIONS = {
     sampleQuestions: BRIDE_SAMPLE_QUESTIONS,
     hasSurvey: true,
   },
+  // Buzzer game-show edition — a different, three-screen architecture (TV /
+  // host / player). It doesn't use the questions/theme model; its board + live
+  // state live in dedicated tables (see supabase-migration-buzzer.sql). The
+  // dashboard only creates it and hands out the three links.
+  buzzer: {
+    id: 'buzzer',
+    label: 'Buzzed In · Game Show',
+    emoji: '📣',
+    blurb: 'A live buzzer board game — pick clues, race to buzz in, scores on the TV.',
+    gameType: 'buzzer',
+  },
 }
 
 // Resolve an edition config, defaulting to the original 'posted' game.
