@@ -44,11 +44,18 @@ export const DEFAULT_BOARD = {
     { name: 'GRAB BAG', clues: [
       { v: 200, clue: 'The number of players each team has on a basketball court.', answer: 'Five' },
       { v: 400, clue: 'The nickname for Mars.', answer: 'The Red Planet' },
-      { v: 600, clue: "Japan's currency.", answer: 'The yen' },
+      { v: 600, clue: "Japan's currency.", answer: 'The yen', dd: true },
       { v: 800, clue: "'Au' is the chemical symbol for this precious metal.", answer: 'Gold' },
       { v: 1000, clue: 'This northeast-African river is usually called the world’s longest.', answer: 'The Nile' },
     ]},
   ],
+  // One shared final clue: every player wagers privately, writes an answer, and
+  // all reveals happen together — the moment a static template can't do.
+  final: {
+    category: 'WORLD CAPITALS',
+    clue: 'This planned inland city, not Sydney or Melbourne, is the national capital of Australia.',
+    answer: 'Canberra',
+  },
 }
 
 // Warm game-show palette (deliberately not Jeopardy's navy + cold gold).

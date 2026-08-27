@@ -10,6 +10,27 @@ export const playerColor = (players, id) => {
 }
 export const playerName = (players, id) => players.find(p => p.player_id === id)?.name || '—'
 
+// ── Teams ─────────────────────────────────────────────────────────────────
+// A game is in team mode when config.settings.teams has names. Score stays
+// per player; a team's total is the sum of its members.
+export const teamOf = (players, id) => players.find(p => p.player_id === id)?.team || null
+export const teamColor = (teams, team) => {
+  const i = teams ? teams.indexOf(team) : -1
+  return i >= 0 ? PLAYER_COLORS[i % PLAYER_COLORS.length] : BZ.muted
+}
+export function teamStandings(players, teams) {
+  return teams.map(t => {
+    const members = players.filter(p => (p.team || null) === t)
+    return { team: t, total: members.reduce((s, p) => s + (p.score || 0), 0), members }
+  })
+}
+// What to call whoever holds board control (a team name, or a player's name).
+export const controlLabel = (players, control, teams) => {
+  if (!control || control === 'host') return null
+  const t = teamOf(players, control)
+  return teams && teams.length && t ? t : playerName(players, control)
+}
+
 // One-time stylesheet for the board grid, card-flip reveal, buzz pulse, and
 // lockout bar. Respects prefers-reduced-motion. Fonts come from the app's
 // existing Fredoka/Nunito setup.
@@ -56,7 +77,40 @@ const CSS = `
 
 // Compact live scoreboard used on the TV + host screens. The current
 // board-controller gets a gold ring + a small "picks next" tag.
-export function Scoreboard({ players, control, dark = false }) {
+export function Scoreboard({ players, control, dark = false, teams = null }) {
+  // Team mode: one chip per team, showing its total and members' initials.
+  if (teams && teams.length) {
+    const controlTeam = teamOf(players, control)
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
+        {teamStandings(players, teams).map(({ team, total, members }) => {
+          const col = teamColor(teams, team)
+          const inControl = team === controlTeam
+          return (
+            <div key={team} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px 9px 12px', borderRadius: 30,
+              background: dark ? '#3a2b42' : '#fff', border: `2px solid ${inControl ? BZ.gold : (dark ? '#4d3a54' : BZ.line)}` }}>
+              <span style={{ width: 12, height: 12, borderRadius: '50%', background: col, flex: 'none' }} />
+              <span style={{ fontWeight: 800, color: dark ? BZ.cream : BZ.ink }}>{team}</span>
+              <span style={{ display: 'flex' }}>
+                {members.map(m => (
+                  <span key={m.player_id} title={m.name} style={{ width: 22, height: 22, borderRadius: '50%',
+                    background: col, color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 11,
+                    marginLeft: -6, border: `1.5px solid ${dark ? '#3a2b42' : '#fff'}` }}>
+                    {m.name.trim().slice(0, 1).toUpperCase()}
+                  </span>
+                ))}
+              </span>
+              <span className="bz-num bz-fd" style={{ fontWeight: 600, fontSize: 18, marginLeft: 4,
+                color: total < 0 ? BZ.clay : (dark ? BZ.gold : BZ.goldDeep) }}>{money(total)}</span>
+              {inControl && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em',
+                textTransform: 'uppercase', color: BZ.goldDeep }}>picks</span>}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
       {players.length === 0 && (

@@ -53,7 +53,10 @@ export function useBuzzerGame({ gameId, role, hostKey = '', playerId = '', playe
         payload => { if (payload.new?.game_id) setState(payload.new) })
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'buzzer_players', filter: `game_id=eq.${gameId}` },
-        () => refetchPlayers())
+        // A roster/score change always rides along with a state transition
+        // (judging, final reveal, game over). Re-sync state too so the screen
+        // never gets stranded if a same-row state event is coalesced/missed.
+        () => { refetchPlayers(); refetchState() })
       .subscribe(status => { if (status === 'SUBSCRIBED') setReady(true) })
     return () => { supabase.removeChannel(ch) }
   }, [gameId, refetchState, refetchPlayers])
@@ -83,6 +86,14 @@ export function useBuzzerGame({ gameId, role, hostKey = '', playerId = '', playe
     pass: async () => { await supabase.rpc('buzzer_pass', { p_game: gameId, p_key: hostKey }) },
     next: async () => { await supabase.rpc('buzzer_next', { p_game: gameId, p_key: hostKey }) },
     reset: async () => { await supabase.rpc('buzzer_reset', { p_game: gameId, p_key: hostKey }) },
+    // Final Jeopardy
+    finalStart: async () => { await supabase.rpc('buzzer_final_start', { p_game: gameId, p_key: hostKey }) },
+    finalWager: async (amount) => { await supabase.rpc('buzzer_final_wager',
+      { p_game: gameId, p_player: playerId, p_key: playerKey, p_amount: amount }) },
+    finalAnswer: async (text) => { await supabase.rpc('buzzer_final_answer',
+      { p_game: gameId, p_player: playerId, p_key: playerKey, p_text: text }) },
+    finalJudge: async (pid, correct) => { await supabase.rpc('buzzer_final_judge',
+      { p_game: gameId, p_key: hostKey, p_player: pid, p_correct: correct }) },
   }
 
   return { config, state, players, ready, notFound, actions, refetchState, refetchPlayers }
@@ -90,9 +101,15 @@ export function useBuzzerGame({ gameId, role, hostKey = '', playerId = '', playe
 
 function stripAnswers(board) {
   if (!board) return board
-  return { ...board, categories: board.categories.map(c => ({
-    ...c, clues: c.clues.map(({ answer, ...rest }) => rest),
-  })) }
+  const { final, ...rest0 } = board
+  return {
+    ...rest0,
+    categories: board.categories.map(c => ({
+      ...c, clues: c.clues.map(({ answer, ...rest }) => rest),
+    })),
+    // players/TV get the final category + clue, but never the answer
+    ...(final ? { final: { category: final.category, clue: final.clue } } : {}),
+  }
 }
 
 // The clue object for the currently-selected cell (or null).

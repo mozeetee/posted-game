@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useBuzzerGame, currentClue } from './useBuzzerGame'
-import { injectBuzzerCss, Scoreboard, playerColor, playerName, money } from './bzShared'
+import { injectBuzzerCss, Scoreboard, playerColor, playerName, money, teamOf, teamColor, teamStandings } from './bzShared'
 import { BZ } from './board'
 
 // The cast-to-TV screen. Display only — no controls. Reacts live to state.
@@ -23,6 +23,7 @@ export default function BuzzerTV({ gameId }) {
 
   const clue = currentClue(config, state)
   const open = state.phase === 'reading' && Date.now() >= new Date(state.open_at).getTime()
+  const teams = config.settings?.teams || null
 
   return (
     <div className="bz" style={{ minHeight: '100vh', background: BZ.paper,
@@ -38,17 +39,20 @@ export default function BuzzerTV({ gameId }) {
 
       <div style={{ flex: 1, display: 'grid', placeItems: 'center' }}>
         {state.phase === 'select' && <Board config={config} state={state} />}
-        {state.phase === 'over' && <GameOver players={players} />}
+        {state.phase === 'over' && <GameOver players={players} teams={teams} />}
         {clue && ['reading', 'buzzed'].includes(state.phase) && (
-          <ClueCard clue={clue} state={state} players={players} open={open} />
+          <ClueCard clue={clue} state={state} players={players} open={open} teams={teams} />
         )}
         {['dd_assign', 'dd_wager', 'dd_answer'].includes(state.phase) && (
           <DailyDouble clue={clue} state={state} players={players} />
         )}
         {state.phase === 'reveal' && <Reveal state={state} players={players} />}
+        {['final_wager', 'final_answer', 'final_reveal'].includes(state.phase) && (
+          <FinalTV state={state} players={players} final={config.board.final} />
+        )}
       </div>
 
-      <Scoreboard players={players} control={state.control} dark={false} />
+      <Scoreboard players={players} control={state.control} dark={false} teams={teams} />
     </div>
   )
 }
@@ -82,7 +86,7 @@ function Board({ config, state }) {
   )
 }
 
-function ClueCard({ clue, state, players, open }) {
+function ClueCard({ clue, state, players, open, teams }) {
   return (
     <div className="bz-flip" key={`${state.cur_cat}-${state.cur_idx}-${state.seq}`}
       style={{ width: '100%', maxWidth: 1000, background: `linear-gradient(160deg,${BZ.screen2},${BZ.screen})`,
@@ -94,7 +98,7 @@ function ClueCard({ clue, state, players, open }) {
       <div className="bz-fd" style={{ color: BZ.cream, fontWeight: 500, fontSize: 'clamp(24px,3.6vw,46px)',
         lineHeight: 1.28, textWrap: 'balance' }}>{clue.clue}</div>
       {state.phase === 'buzzed'
-        ? <BuzzedBanner state={state} players={players} />
+        ? <BuzzedBanner state={state} players={players} teams={teams} />
         : <div style={{ width: 'min(420px,80%)' }}>
             {open
               ? <div className="bz-buzz bz-fd" style={{ color: BZ.gold, fontWeight: 600, fontSize: 26 }}>
@@ -109,12 +113,13 @@ function ClueCard({ clue, state, players, open }) {
   )
 }
 
-function BuzzedBanner({ state, players }) {
-  const col = playerColor(players, state.winner)
+function BuzzedBanner({ state, players, teams }) {
+  const t = teams && teams.length ? teamOf(players, state.winner) : null
+  const col = t ? teamColor(teams, t) : playerColor(players, state.winner)
   return (
     <div className="bz-fd" style={{ background: col, color: '#fff', borderRadius: 18, padding: '14px 30px',
       fontWeight: 600, fontSize: 'clamp(20px,2.6vw,30px)' }}>
-      {playerName(players, state.winner)} buzzed in!
+      {t ? `${playerName(players, state.winner)} · ${t}` : playerName(players, state.winner)} buzzed in!
     </div>
   )
 }
@@ -160,8 +165,10 @@ function Reveal({ state, players }) {
   )
 }
 
-function GameOver({ players }) {
-  const ranked = [...players].sort((a, b) => b.score - a.score)
+function GameOver({ players, teams }) {
+  const ranked = teams && teams.length
+    ? teamStandings(players, teams).map(t => ({ id: t.team, name: t.team, score: t.total })).sort((a, b) => b.score - a.score)
+    : [...players].sort((a, b) => b.score - a.score).map(p => ({ id: p.player_id, name: p.name, score: p.score }))
   const top = ranked[0]
   return (
     <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center' }}>
@@ -169,17 +176,52 @@ function GameOver({ players }) {
         {top ? `${top.name} wins!` : 'Game over'}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 320 }}>
-        {ranked.map((p, i) => (
-          <div key={p.player_id} style={{ display: 'flex', alignItems: 'center', gap: 12,
+        {ranked.map((r, i) => (
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 12,
             background: '#fff', border: `1px solid ${BZ.line}`, borderRadius: 14, padding: '12px 18px' }}>
             <span style={{ width: 26, textAlign: 'center', fontWeight: 800 }}>{['🏆', '🥈', '🥉'][i] || i + 1}</span>
-            <span style={{ flex: 1, textAlign: 'left', fontWeight: 700 }}>{p.name}</span>
-            <span className="bz-num bz-fd" style={{ fontWeight: 600, color: p.score < 0 ? BZ.clay : BZ.goldDeep }}>
-              {money(p.score)}
+            <span style={{ flex: 1, textAlign: 'left', fontWeight: 700 }}>{r.name}</span>
+            <span className="bz-num bz-fd" style={{ fontWeight: 600, color: r.score < 0 ? BZ.clay : BZ.goldDeep }}>
+              {money(r.score)}
             </span>
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function FinalTV({ state, players, final }) {
+  const wagered = players.filter(p => p.final_wager != null).length
+  const answered = players.filter(p => p.final_answer != null).length
+  const panel = children => (
+    <div style={{ width: '100%', maxWidth: 1000, background: `linear-gradient(160deg,${BZ.plum},${BZ.screen})`,
+      border: `1px solid ${BZ.screenLine}`, borderRadius: 26, padding: 'clamp(28px,5vw,64px)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22, textAlign: 'center' }}>
+      <div className="bz-fd bz-buzz" style={{ color: BZ.gold, fontWeight: 600, fontSize: 'clamp(26px,3.4vw,44px)' }}>Final Jeopardy</div>
+      {children}
+    </div>
+  )
+  if (state.phase === 'final_wager')
+    return panel(<>
+      <div className="bz-fd" style={{ color: BZ.cream, fontWeight: 600, fontSize: 'clamp(26px,3.4vw,44px)' }}>{final?.category}</div>
+      <div style={{ color: '#e6d4ee', fontSize: 18, fontWeight: 700 }}>Placing secret wagers… ({wagered}/{players.length})</div>
+    </>)
+  if (state.phase === 'final_answer')
+    return panel(<>
+      <div style={{ color: BZ.gold, fontSize: 15, fontWeight: 800, letterSpacing: '.14em', textTransform: 'uppercase' }}>{final?.category}</div>
+      <div className="bz-fd" style={{ color: BZ.cream, fontWeight: 500, fontSize: 'clamp(24px,3.4vw,44px)', lineHeight: 1.28, textWrap: 'balance' }}>{final?.clue}</div>
+      <div style={{ color: '#e6d4ee', fontSize: 18, fontWeight: 700 }}>Answers locking in… ({answered}/{players.length})</div>
+    </>)
+  const done = new Set(state.final_done || [])
+  const cur = players.filter(p => !done.has(p.player_id)).sort((a, b) => a.score - b.score)[0]
+  if (!cur) return panel(<div style={{ color: '#e6d4ee' }}>Revealing…</div>)
+  return panel(
+    <div className="bz-flip" key={cur.player_id} style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
+      <div className="bz-fd" style={{ color: BZ.cream, fontWeight: 600, fontSize: 'clamp(24px,3vw,38px)' }}>{cur.name}</div>
+      <div style={{ color: '#b7a9c0', fontSize: 14, fontWeight: 800, letterSpacing: '.18em', textTransform: 'uppercase' }}>wrote</div>
+      <div className="bz-fd" style={{ color: BZ.cream, fontWeight: 500, fontSize: 'clamp(26px,3.6vw,48px)', textWrap: 'balance' }}>{cur.final_answer || '—'}</div>
+      <div style={{ color: BZ.gold, fontSize: 18, fontWeight: 700 }}>Wagered {money(cur.final_wager || 0)}</div>
     </div>
   )
 }

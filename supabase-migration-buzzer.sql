@@ -327,3 +327,175 @@ returns void language sql security definer as $$
   insert into buzzer_state (game_id) values (p_game) on conflict (game_id) do nothing;
 $$;
 grant execute on function buzzer_init(text) to anon, authenticated;
+-- ── Final Jeopardy ──────────────────────────────────────────────────────────
+alter table buzzer_state add column if not exists final_done jsonb not null default '[]';
+
+-- Host starts the final round: everyone wagers, then answers, then reveal.
+create or replace function buzzer_final_start(p_game text, p_key text)
+returns void language plpgsql security definer as $$
+begin
+  if not _buzzer_is_host(p_game, p_key) then raise exception 'host only'; end if;
+  update buzzer_players set final_wager = null, final_answer = null where game_id = p_game;
+  update buzzer_state set phase = 'final_wager', final_done = '[]'::jsonb,
+    cur_cat = null, cur_idx = null, winner = null, reveal = null, updated_at = now()
+  where game_id = p_game;
+end $$;
+
+-- Player locks a secret wager (0 .. their current score).
+create or replace function buzzer_final_wager(p_game text, p_player text, p_key text, p_amount int)
+returns void language plpgsql security definer as $$
+declare v_score int; v_pending int;
+begin
+  if not _buzzer_is_player(p_game, p_player, p_key) then raise exception 'bad key'; end if;
+  if (select phase from buzzer_state where game_id = p_game) <> 'final_wager' then return; end if;
+  select score into v_score from buzzer_players where game_id = p_game and player_id = p_player;
+  update buzzer_players set final_wager = least(greatest(p_amount, 0), greatest(v_score, 0))
+    where game_id = p_game and player_id = p_player;
+  select count(*) into v_pending from buzzer_players where game_id = p_game and final_wager is null;
+  if v_pending = 0 then update buzzer_state set phase = 'final_answer', updated_at = now() where game_id = p_game; end if;
+end $$;
+
+-- Player locks a secret written answer.
+create or replace function buzzer_final_answer(p_game text, p_player text, p_key text, p_text text)
+returns void language plpgsql security definer as $$
+declare v_pending int;
+begin
+  if not _buzzer_is_player(p_game, p_player, p_key) then raise exception 'bad key'; end if;
+  if (select phase from buzzer_state where game_id = p_game) <> 'final_answer' then return; end if;
+  update buzzer_players set final_answer = coalesce(p_text, '') where game_id = p_game and player_id = p_player;
+  select count(*) into v_pending from buzzer_players where game_id = p_game and final_answer is null;
+  if v_pending = 0 then update buzzer_state set phase = 'final_reveal', updated_at = now() where game_id = p_game; end if;
+end $$;
+
+-- Host reveals one player right/wrong → apply their wager. All done → game over.
+create or replace function buzzer_final_judge(p_game text, p_key text, p_player text, p_correct boolean)
+returns void language plpgsql security definer as $$
+declare v_wager int; v_pending int;
+begin
+  if not _buzzer_is_host(p_game, p_key) then raise exception 'host only'; end if;
+  if (select phase from buzzer_state where game_id = p_game) <> 'final_reveal' then return; end if;
+  if (select final_done from buzzer_state where game_id = p_game) @> to_jsonb(p_player) then return; end if;
+  select final_wager into v_wager from buzzer_players where game_id = p_game and player_id = p_player;
+  update buzzer_players set score = score + (case when p_correct then coalesce(v_wager,0) else -coalesce(v_wager,0) end)
+    where game_id = p_game and player_id = p_player;
+  update buzzer_state set final_done = final_done || to_jsonb(p_player), updated_at = now() where game_id = p_game;
+  select count(*) into v_pending from buzzer_players bp where bp.game_id = p_game
+    and not ((select final_done from buzzer_state where game_id = p_game) @> to_jsonb(bp.player_id));
+  if v_pending = 0 then update buzzer_state set phase = 'over', updated_at = now() where game_id = p_game; end if;
+end $$;
+
+grant execute on all functions in schema public to anon, authenticated;
+notify pgrst, 'reload schema';
+-- ── Team play ────────────────────────────────────────────────────────────────
+-- Teams are just a `team` label on buzzer_players (null = individual). Score
+-- still lives per player; a team's total is the sum of its members (summed in
+-- the UI). What changes server-side: board control and the wrong-answer lockout
+-- act on the whole team, per the spec.
+
+-- Do two players share a (non-null) team?
+create or replace function _buzzer_same_team(p_game text, a text, b text)
+returns boolean language sql security definer stable as $$
+  select exists(
+    select 1 from buzzer_players pa
+    join buzzer_players pb on pb.game_id = pa.game_id and pb.team = pa.team
+    where pa.game_id = p_game and pa.player_id = a and pb.player_id = b and pa.team is not null);
+$$;
+
+-- All player_ids that share a player's team (or just [player] when solo).
+create or replace function _buzzer_team_members(p_game text, p_player text)
+returns jsonb language plpgsql security definer stable as $$
+declare t text; res jsonb;
+begin
+  select team into t from buzzer_players where game_id = p_game and player_id = p_player;
+  if t is null then return to_jsonb(p_player); end if;
+  select coalesce(jsonb_agg(player_id), to_jsonb(p_player)) into res
+    from buzzer_players where game_id = p_game and team = t;
+  return res;
+end $$;
+
+-- Pick a clue — now any teammate of the controller can pick, not just them.
+create or replace function buzzer_pick(p_game text, p_actor text, p_key text, p_cat int, p_idx int)
+returns void language plpgsql security definer as $$
+declare st buzzer_state; is_dd boolean; ok boolean;
+begin
+  select * into st from buzzer_state where game_id = p_game for update;
+  if st.phase <> 'select' then return; end if;
+  if st.control = 'host'
+    then ok := _buzzer_is_host(p_game, p_key);
+    else ok := (p_actor = st.control or _buzzer_same_team(p_game, p_actor, st.control))
+               and _buzzer_is_player(p_game, p_actor, p_key);
+  end if;
+  if not ok then raise exception 'not your turn to pick'; end if;
+  if st.done @> to_jsonb(p_cat || '-' || p_idx) then return; end if;
+
+  select coalesce((data->'board'->'categories'->p_cat->'clues'->p_idx->>'dd')::boolean, false)
+    into is_dd from games where game_id = p_game;
+
+  update buzzer_state set
+    cur_cat = p_cat, cur_idx = p_idx, winner = null, missed = '[]'::jsonb, reveal = null,
+    seq = seq + 1,
+    phase = case when is_dd then (case when st.control = 'host' then 'dd_assign' else 'dd_wager' end)
+                 else 'reading' end,
+    dd_player = case when is_dd and st.control <> 'host' then st.control else null end,
+    dd_wager = null,
+    open_at = case when is_dd then null else now() + (lockout_ms || ' milliseconds')::interval end,
+    updated_at = now()
+  where game_id = p_game;
+end $$;
+
+-- Judge a buzz-in — a wrong answer now locks out the buzzer's whole team.
+create or replace function buzzer_judge(p_game text, p_key text, p_correct boolean)
+returns void language plpgsql security definer as $$
+declare st buzzer_state; clue jsonb; val int; ans text; k text; remaining int; newmissed jsonb;
+begin
+  if not _buzzer_is_host(p_game, p_key) then raise exception 'host only'; end if;
+  select * into st from buzzer_state where game_id = p_game for update;
+  select data->'board'->'categories'->st.cur_cat->'clues'->st.cur_idx
+    into clue from games where game_id = p_game;
+  val := (clue->>'v')::int; ans := clue->>'answer';
+  k := st.cur_cat || '-' || st.cur_idx;
+
+  if st.phase = 'dd_answer' then
+    update buzzer_players set score = score + (case when p_correct then st.dd_wager else -st.dd_wager end)
+      where game_id = p_game and player_id = st.dd_player;
+    update buzzer_state set
+      control = st.dd_player,
+      reveal  = json_build_object('answer', ans, 'who', case when p_correct then st.dd_player end,
+                                  'delta', (case when p_correct then 1 else -1 end) * st.dd_wager),
+      phase = 'reveal', done = done || to_jsonb(k), updated_at = now()
+    where game_id = p_game;
+    return;
+  end if;
+
+  if st.phase <> 'buzzed' then return; end if;
+
+  if p_correct then
+    update buzzer_players set score = score + val
+      where game_id = p_game and player_id = st.winner;
+    update buzzer_state set
+      control = st.winner, reveal = json_build_object('answer', ans, 'who', st.winner, 'delta', val),
+      phase = 'reveal', done = done || to_jsonb(k), updated_at = now()
+    where game_id = p_game;
+  else
+    update buzzer_players set score = score - val
+      where game_id = p_game and player_id = st.winner;
+    newmissed := st.missed || _buzzer_team_members(p_game, st.winner);
+    select count(*) into remaining from buzzer_players bp
+      where bp.game_id = p_game and not (newmissed @> to_jsonb(bp.player_id));
+    if remaining = 0 then
+      update buzzer_state set
+        missed = newmissed, winner = null, control = 'host',
+        reveal = json_build_object('answer', ans, 'who', null, 'delta', 0),
+        phase = 'reveal', done = done || to_jsonb(k), updated_at = now()
+      where game_id = p_game;
+    else
+      update buzzer_state set
+        missed = newmissed, winner = null, phase = 'reading',
+        open_at = now(), seq = seq + 1, updated_at = now()
+      where game_id = p_game;   -- reopen for the other teams (no lockout on a reopen)
+    end if;
+  end if;
+end $$;
+
+grant execute on all functions in schema public to anon, authenticated;
+notify pgrst, 'reload schema';

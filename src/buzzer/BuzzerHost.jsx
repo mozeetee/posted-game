@@ -1,5 +1,5 @@
 import { useBuzzerGame, currentClue } from './useBuzzerGame'
-import { injectBuzzerCss, Scoreboard, playerColor, playerName, money } from './bzShared'
+import { injectBuzzerCss, Scoreboard, playerColor, playerName, money, teamStandings } from './bzShared'
 import { BZ, PLAYER_COLORS } from './board'
 
 // The host's controller. Runs the flow: pick (when in control), judge buzz-ins,
@@ -12,6 +12,7 @@ export default function BuzzerHost({ gameId, hostKey }) {
   if (!config || !state) return <Wrap>Loading…</Wrap>
 
   const clue = currentClue(config, state)
+  const teams = config.settings?.teams || null
   const btn = (bg) => ({ border: 0, borderRadius: 14, padding: '15px 20px', fontWeight: 800, fontSize: 16,
     color: '#fff', background: bg, cursor: 'pointer', fontFamily: 'inherit' })
 
@@ -22,13 +23,22 @@ export default function BuzzerHost({ gameId, hostKey }) {
           <div className="bz-fd" style={{ fontWeight: 600, fontSize: 22, color: BZ.plum }}>
             Host controller <span style={{ color: BZ.muted, fontSize: 14, fontWeight: 700 }}>· {config.title}</span>
           </div>
-          <button onClick={() => { if (confirm('Reset scores and the whole board?')) actions.reset() }}
-            style={{ background: 'none', border: 'none', color: BZ.muted, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-            Reset game
-          </button>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            {['select', 'over'].includes(state.phase) && (
+              <button onClick={() => { if (confirm('Start Final Jeopardy now?')) actions.finalStart() }}
+                style={{ background: BZ.gold, border: 'none', color: '#fff', cursor: 'pointer', fontSize: 13,
+                  fontWeight: 800, borderRadius: 10, padding: '8px 14px', fontFamily: 'inherit' }}>
+                Final Jeopardy
+              </button>
+            )}
+            <button onClick={() => { if (confirm('Reset scores and the whole board?')) actions.reset() }}
+              style={{ background: 'none', border: 'none', color: BZ.muted, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+              Reset game
+            </button>
+          </div>
         </div>
 
-        <Scoreboard players={players} control={state.control} dark={false} />
+        <Scoreboard players={players} control={state.control} dark={false} teams={teams} />
 
         <div style={{ background: '#fff', border: `1px solid ${BZ.line}`, borderRadius: 18, padding: 20 }}>
           {/* SELECT */}
@@ -100,12 +110,55 @@ export default function BuzzerHost({ gameId, hostKey }) {
             </div>
           )}
 
-          {state.phase === 'over' && (
-            <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div className="bz-fd" style={{ fontWeight: 600, fontSize: 22 }}>That’s the board!</div>
-              <button style={btn(BZ.plum)} onClick={() => actions.reset()}>Play again</button>
+          {/* FINAL JEOPARDY */}
+          {state.phase === 'final_wager' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'center' }}>
+              <Label>Final Jeopardy · {config.board.final?.category}</Label>
+              <Waiting>Players are entering secret wagers… ({players.filter(p => p.final_wager != null).length}/{players.length})</Waiting>
             </div>
           )}
+          {state.phase === 'final_answer' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <Label>Final Jeopardy · {config.board.final?.category}</Label>
+              <div style={{ background: BZ.paper2, borderRadius: 14, padding: 16, textAlign: 'center' }}>
+                <div className="bz-fd" style={{ fontWeight: 500, fontSize: 19, lineHeight: 1.3 }}>{config.board.final?.clue}</div>
+                <div style={{ fontSize: 14, color: BZ.sageDeep, fontWeight: 800, marginTop: 8 }}>Answer: {config.board.final?.answer}</div>
+              </div>
+              <Waiting>Players are writing answers… ({players.filter(p => p.final_answer != null).length}/{players.length})</Waiting>
+            </div>
+          )}
+          {state.phase === 'final_reveal' && (() => {
+            const done = new Set(state.final_done || [])
+            const cur = players.filter(p => !done.has(p.player_id)).sort((a, b) => a.score - b.score)[0]
+            if (!cur) return null
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'center' }}>
+                <Label>Final reveal · lowest score first</Label>
+                <div className="bz-fd" style={{ fontWeight: 600, fontSize: 20, color: playerColor(players, cur.player_id) }}>{cur.name}</div>
+                <div style={{ fontSize: 12, color: BZ.muted, fontWeight: 800, letterSpacing: '.14em', textTransform: 'uppercase' }}>wrote</div>
+                <div className="bz-fd" style={{ fontWeight: 500, fontSize: 22 }}>{cur.final_answer || '—'}</div>
+                <div style={{ color: BZ.muted, fontWeight: 700 }}>Wagered {money(cur.final_wager || 0)} · has {money(cur.score)}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <button style={btn(BZ.sageDeep)} onClick={() => actions.finalJudge(cur.player_id, true)}>Correct</button>
+                  <button style={btn(BZ.clay)} onClick={() => actions.finalJudge(cur.player_id, false)}>Incorrect</button>
+                </div>
+              </div>
+            )
+          })()}
+
+          {state.phase === 'over' && (() => {
+            const win = teams && teams.length
+              ? teamStandings(players, teams).map(t => ({ name: t.team, score: t.total })).sort((a, b) => b.score - a.score)[0]
+              : [...players].sort((a, b) => b.score - a.score)[0]
+            return (
+              <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {win
+                  ? <div className="bz-fd" style={{ fontWeight: 600, fontSize: 24 }}>🏆 {win.name} wins with {money(win.score)}!</div>
+                  : <div className="bz-fd" style={{ fontWeight: 600, fontSize: 22 }}>That’s the game!</div>}
+                <button style={btn(BZ.plum)} onClick={() => actions.reset()}>Play again</button>
+              </div>
+            )
+          })()}
         </div>
       </div>
     </div>
