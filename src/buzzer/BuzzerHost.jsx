@@ -43,6 +43,19 @@ export default function BuzzerHost({ gameId, hostKey }) {
         <Scoreboard players={players} control={state.control} dark={false} teams={teams} />
 
         <div style={{ background: '#fff', border: `1px solid ${BZ.line}`, borderRadius: 18, padding: 20 }}>
+          {/* LOBBY — wait for players, then start */}
+          {state.phase === 'lobby' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, textAlign: 'center' }}>
+              <Label>Lobby · {players.length} {players.length === 1 ? 'player' : 'players'} in</Label>
+              {config.settings?.welcome && (
+                <div style={{ color: BZ.muted, fontSize: 14, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{config.settings.welcome}</div>
+              )}
+              {players.length === 0
+                ? <Waiting>Send the players’ buzzer link — waiting for people to join…</Waiting>
+                : <button style={btn('var(--bz-accent)')} onClick={() => actions.start()}>Start game →</button>}
+            </div>
+          )}
+
           {/* SELECT */}
           {state.phase === 'select' && (
             state.control === 'host'

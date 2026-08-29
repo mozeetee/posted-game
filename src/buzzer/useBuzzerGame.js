@@ -90,6 +90,8 @@ export function useBuzzerGame({ gameId, role, hostKey = '', playerId = '', playe
     pass: async () => { await supabase.rpc('buzzer_pass', { p_game: gameId, p_key: hostKey }) },
     next: async () => { await supabase.rpc('buzzer_next', { p_game: gameId, p_key: hostKey }) },
     reset: async () => { await supabase.rpc('buzzer_reset', { p_game: gameId, p_key: hostKey }) },
+    // Host closes the lobby and starts play.
+    start: async () => { await supabase.rpc('buzzer_start', { p_game: gameId, p_key: hostKey }) },
     // Final Jeopardy
     finalStart: async () => { await supabase.rpc('buzzer_final_start', { p_game: gameId, p_key: hostKey }) },
     finalWager: async (amount) => { await supabase.rpc('buzzer_final_wager',

@@ -59,6 +59,7 @@ export default function BuzzerTV({ gameId }) {
       </div>
 
       <div style={{ flex: 1, display: 'grid', placeItems: 'center' }}>
+        {state.phase === 'lobby' && <Lobby config={config} players={players} gameId={gameId} />}
         {state.phase === 'select' && <Board config={config} state={state} />}
         {state.phase === 'over' && <GameOver players={players} teams={teams} />}
         {state.phase === 'armed' && clue && (
@@ -77,6 +78,33 @@ export default function BuzzerTV({ gameId }) {
       </div>
 
       <Scoreboard players={players} control={state.control} dark={false} teams={teams} />
+    </div>
+  )
+}
+
+function Lobby({ config, players, gameId }) {
+  const joinUrl = `${location.origin}/?game=${gameId}&gt=buzzer`.replace(/^https?:\/\//, '')
+  return (
+    <div style={{ width: '100%', maxWidth: 900, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 22 }}>
+      {config.settings?.welcome
+        ? <div className="bz-fd" style={{ color: BZ.ink, fontWeight: 500, fontSize: 'clamp(22px,3vw,38px)', whiteSpace: 'pre-wrap', lineHeight: 1.3 }}>{config.settings.welcome}</div>
+        : <div className="bz-fd" style={{ color: 'var(--bz-accent)', fontWeight: 600, fontSize: 'clamp(26px,3.4vw,44px)' }}>Get ready to play!</div>}
+      <div style={{ color: BZ.muted, fontSize: 18, fontWeight: 700 }}>
+        Join on your phone at <span style={{ color: BZ.ink, fontWeight: 800 }}>{joinUrl}</span>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center' }}>
+        {players.length === 0
+          ? <div style={{ color: BZ.muted, fontSize: 16 }}>Waiting for players…</div>
+          : players.map(p => (
+              <div key={p.player_id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff',
+                border: `1px solid ${BZ.line}`, borderRadius: 30, padding: '9px 18px 9px 10px' }}>
+                <span style={{ width: 30, height: 30, borderRadius: '50%', background: p.color || BZ.plum, color: '#fff',
+                  display: 'grid', placeItems: 'center', fontWeight: 800 }}>{p.name.trim().slice(0, 1).toUpperCase()}</span>
+                <span style={{ fontWeight: 700, color: BZ.ink }}>{p.name}</span>
+              </div>
+            ))}
+      </div>
+      <div style={{ color: BZ.muted, fontWeight: 700 }}>The host will start the game soon…</div>
     </div>
   )
 }
