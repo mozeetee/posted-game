@@ -1761,13 +1761,14 @@ const BZ_FONTS = ['Fredoka', 'Poppins', 'Quicksand', 'Baloo 2', 'Righteous', 'Lu
 function BuzzerBoardEditor({ game, s, c, onDone }) {
   const [board, setBoard] = useState(() => structuredClone(game.board))
   const [name, setName] = useState(game.title || '')
+  const [welcome, setWelcome] = useState(game.settings?.welcome || '')
   const [theme, setThemeState] = useState(() => ({ ...(game.settings?.theme || {}) }))
   const [saving, setSaving] = useState(false)
   const edit = fn => setBoard(b => { const nb = structuredClone(b); fn(nb); return nb })
   const accent = theme.accent || '#8f5a73'
   const save = async () => {
     setSaving(true)
-    const settings = { ...(game.settings || {}), theme }
+    const settings = { ...(game.settings || {}), theme, welcome }
     game.board = board; game.title = name; game.settings = settings
     await supabase.from('games').update({ data: { ...game, title: name, board, settings } }).eq('game_id', game.id)
     setSaving(false); onDone()
@@ -1788,7 +1789,12 @@ function BuzzerBoardEditor({ game, s, c, onDone }) {
       <div style={{ ...s.shareBox, marginBottom: 14 }}>
         <div style={{ fontSize: 10, letterSpacing: 2, color: c.accent, marginBottom: 10 }}>GAME SETUP</div>
         <label style={s.label}>NAME</label>
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Buzzed In" style={{ ...s.input, marginBottom: 14 }} />
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Kat’s Birthday Showdown" style={{ ...s.input, marginBottom: 14 }} />
+        <label style={s.label}>WELCOME MESSAGE</label>
+        <div style={{ fontSize: 11, color: c.textFaint, marginTop: -4, marginBottom: 8 }}>Shown to players in the lobby while they wait for you to start. Leave blank to skip it.</div>
+        <textarea value={welcome} onChange={e => setWelcome(e.target.value)} rows={3}
+          placeholder={"e.g. Welcome to game night! 🎉\nGrab a drink and get ready to buzz in."}
+          style={{ ...s.input, marginBottom: 14, resize: 'vertical', fontFamily: 'inherit' }} />
         <label style={s.label}>ACCENT COLOR</label>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '4px 0 14px' }}>
           {BZ_ACCENTS.map(col => (

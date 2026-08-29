@@ -58,6 +58,17 @@ export default function BuzzerPlayer({ gameId }) {
       </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 16 }}>
+        {/* LOBBY — joined, waiting for the host to start */}
+        {state.phase === 'lobby' && (
+          <div style={{ textAlign: 'center' }}>
+            <div className="bz-fd" style={{ fontSize: 28, fontWeight: 600, color: myColor }}>You’re in!</div>
+            {config.settings?.welcome && (
+              <div style={{ color: BZ.muted, marginTop: 10, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{config.settings.welcome}</div>
+            )}
+            <div style={{ marginTop: 14 }}><Muted>Waiting for the host to start…</Muted></div>
+          </div>
+        )}
+
         {/* SELECT — pick if you have control */}
         {state.phase === 'select' && (iControl
           ? <div>

@@ -588,3 +588,42 @@ end $$;
 
 grant execute on all functions in schema public to anon, authenticated;
 notify pgrst, 'reload schema';
+-- ── Lobby: games wait for the host to start, like the other editions ─────────
+
+-- New buzzer games open in a lobby (was: straight to the board).
+create or replace function buzzer_init(p_game text)
+returns void language sql security definer as $$
+  insert into buzzer_state (game_id, phase) values (p_game, 'lobby') on conflict (game_id) do nothing;
+$$;
+
+-- Host starts the game once everyone's in → first joiner gets board control.
+create or replace function buzzer_start(p_game text, p_key text)
+returns void language plpgsql security definer as $$
+begin
+  if not _buzzer_is_host(p_game, p_key) then raise exception 'host only'; end if;
+  update buzzer_state set phase = 'select',
+    control = coalesce(
+      case when control = 'host'
+        then (select player_id from buzzer_players where game_id = p_game order by joined_at limit 1)
+      end, control, 'host'),
+    updated_at = now()
+  where game_id = p_game and phase = 'lobby';
+end $$;
+
+-- Reset (Play again / Reset game) returns to the lobby so the host re-starts.
+create or replace function buzzer_reset(p_game text, p_key text)
+returns void language plpgsql security definer as $$
+begin
+  if not _buzzer_is_host(p_game, p_key) then raise exception 'host only'; end if;
+  update buzzer_players set score = 0, final_wager = null, final_answer = null where game_id = p_game;
+  update buzzer_state set
+    phase = 'lobby',
+    control = coalesce((select player_id from buzzer_players where game_id = p_game order by joined_at limit 1), 'host'),
+    cur_cat = null, cur_idx = null, seq = 0, winner = null,
+    missed = '[]'::jsonb, done = '[]'::jsonb, final_done = '[]'::jsonb, final_show = null,
+    open_at = null, dd_player = null, dd_wager = null, reveal = null, updated_at = now()
+  where game_id = p_game;
+end $$;
+
+grant execute on all functions in schema public to anon, authenticated;
+notify pgrst, 'reload schema';
