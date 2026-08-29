@@ -1,11 +1,33 @@
 import { useEffect } from 'react'
 import { BZ, PLAYER_COLORS } from './board'
+import { ensureGoogleFont } from '../theme'
+
+// Fonts a host can pick for their game show (all Google Fonts). Fredoka is the
+// default brand face.
+export const BZ_FONTS = ['Fredoka', 'Poppins', 'Quicksand', 'Baloo 2', 'Righteous', 'Luckiest Guy']
+
+// Resolve a game's custom theme (accent color + display font + name) with
+// sensible brand defaults, and hand back the CSS vars the screens set on their
+// root so accent/font flow everywhere through var(--bz-accent) / var(--bz-fd).
+export function bzTheme(config) {
+  const t = config?.settings?.theme || {}
+  const accent = t.accent || BZ.plum
+  const font = t.font || 'Fredoka'
+  return { accent, font, name: config?.title || 'Buzzed In',
+    vars: { '--bz-accent': accent, '--bz-fd': `'${font}'` } }
+}
+// Load a themed display font once it's known (no-op for the default).
+export function useBzFont(font) {
+  useEffect(() => { if (font && font !== 'Fredoka') ensureGoogleFont(`'${font}', sans-serif`) }, [font])
+}
 
 // Money formatting with a thin space so big numbers stay readable.
 export const money = n => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US')
 
 export const playerColor = (players, id) => {
-  const i = players.findIndex(p => p.player_id === id)
+  const p = players.find(x => x.player_id === id)
+  if (p?.color) return p.color            // player's own pick
+  const i = players.findIndex(x => x.player_id === id)
   return i >= 0 ? PLAYER_COLORS[i % PLAYER_COLORS.length] : BZ.muted
 }
 export const playerName = (players, id) => players.find(p => p.player_id === id)?.name || '—'
@@ -47,7 +69,7 @@ export function injectBuzzerCss() {
 const CSS = `
 .bz{--paper:${BZ.paper};--ink:${BZ.ink};--muted:${BZ.muted};--gold:${BZ.gold};--screen:${BZ.screen};--cream:${BZ.cream};
   font-family:'Nunito Sans',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
-.bz-fd{font-family:'Fredoka','Nunito Sans',system-ui,sans-serif}
+.bz-fd{font-family:var(--bz-fd,'Fredoka'),'Nunito Sans',system-ui,sans-serif}
 .bz-num{font-variant-numeric:tabular-nums}
 .bz-board{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
 .bz-col{display:flex;flex-direction:column;gap:10px;min-width:0}
@@ -117,7 +139,7 @@ export function Scoreboard({ players, control, dark = false, teams = null }) {
         <div style={{ color: dark ? '#b7a9c0' : BZ.muted, fontSize: 15 }}>Waiting for players to join…</div>
       )}
       {players.map((p, i) => {
-        const col = PLAYER_COLORS[i % PLAYER_COLORS.length]
+        const col = p.color || PLAYER_COLORS[i % PLAYER_COLORS.length]
         const inControl = control === p.player_id
         return (
           <div key={p.player_id} style={{

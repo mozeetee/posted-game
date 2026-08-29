@@ -1755,14 +1755,21 @@ function BuzzerManage({ game, s, c, isHostMode, onHome, onToggleMode, dashMode }
 
 // Edit any of the 30 clues (or the Final), rename categories, and mark up to a
 // couple of hidden Daily Doubles. Values stay fixed by row ($200–$1000).
+const BZ_ACCENTS = ['#8f5a73', '#4f6b50', '#c98a2f', '#c0553a', '#4f7d73', '#5b6bb0', '#b0446f', '#2b2030']
+const BZ_FONTS = ['Fredoka', 'Poppins', 'Quicksand', 'Baloo 2', 'Righteous', 'Luckiest Guy']
+
 function BuzzerBoardEditor({ game, s, c, onDone }) {
   const [board, setBoard] = useState(() => structuredClone(game.board))
+  const [name, setName] = useState(game.title || '')
+  const [theme, setThemeState] = useState(() => ({ ...(game.settings?.theme || {}) }))
   const [saving, setSaving] = useState(false)
   const edit = fn => setBoard(b => { const nb = structuredClone(b); fn(nb); return nb })
+  const accent = theme.accent || '#8f5a73'
   const save = async () => {
     setSaving(true)
-    game.board = board
-    await supabase.from('games').update({ data: { ...game, board } }).eq('game_id', game.id)
+    const settings = { ...(game.settings || {}), theme }
+    game.board = board; game.title = name; game.settings = settings
+    await supabase.from('games').update({ data: { ...game, title: name, board, settings } }).eq('game_id', game.id)
     setSaving(false); onDone()
   }
   const ddCount = board.categories.flatMap(cat => cat.clues).filter(cl => cl.dd).length
@@ -1777,6 +1784,24 @@ function BuzzerBoardEditor({ game, s, c, onDone }) {
       <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 14, lineHeight: 1.5 }}>
         Swap any clue for your own — quotes, photos in words, inside jokes. Tick “Daily Double” on a clue or two to hide a surprise.
         {' '}<b style={{ color: ddCount === 2 ? c.success : c.accent }}>{ddCount} Daily Double{ddCount !== 1 ? 's' : ''} set.</b>
+      </div>
+      <div style={{ ...s.shareBox, marginBottom: 14 }}>
+        <div style={{ fontSize: 10, letterSpacing: 2, color: c.accent, marginBottom: 10 }}>GAME SETUP</div>
+        <label style={s.label}>NAME</label>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Buzzed In" style={{ ...s.input, marginBottom: 14 }} />
+        <label style={s.label}>ACCENT COLOR</label>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '4px 0 14px' }}>
+          {BZ_ACCENTS.map(col => (
+            <button key={col} onClick={() => setThemeState(t => ({ ...t, accent: col }))} aria-label={`accent ${col}`}
+              style={{ width: 34, height: 34, borderRadius: '50%', background: col, cursor: 'pointer',
+                border: accent === col ? `3px solid ${c.text}` : `3px solid ${c.border}` }} />
+          ))}
+        </div>
+        <label style={s.label}>FONT</label>
+        <select value={theme.font || 'Fredoka'} onChange={e => setThemeState(t => ({ ...t, font: e.target.value }))}
+          style={{ ...s.input, fontFamily: theme.font ? `'${theme.font}', sans-serif` : undefined }}>
+          {BZ_FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+        </select>
       </div>
       {board.categories.map((cat, ci) => (
         <div key={ci} style={{ ...s.shareBox, marginBottom: 14 }}>

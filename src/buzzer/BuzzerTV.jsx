@@ -1,13 +1,31 @@
 import { useState, useEffect } from 'react'
 import { useBuzzerGame, currentClue } from './useBuzzerGame'
-import { injectBuzzerCss, Scoreboard, playerColor, playerName, money, teamOf, teamColor, teamStandings } from './bzShared'
+import { injectBuzzerCss, Scoreboard, playerColor, playerName, money, teamOf, teamColor, teamStandings, bzTheme, useBzFont } from './bzShared'
 import { BZ } from './board'
+import { enableAudio, disableAudio, playBuzz, playDing, playWomp, startMusic, stopMusic } from './bzAudio'
 
 // The cast-to-TV screen. Display only — no controls. Reacts live to state.
 export default function BuzzerTV({ gameId }) {
   injectBuzzerCss()
   const { config, state, players, notFound } = useBuzzerGame({ gameId, role: 'tv' })
   const [, force] = useState(0)
+  const [soundOn, setSoundOn] = useState(false)
+  const phase = state?.phase
+  useBzFont(config?.settings?.theme?.font)
+
+  // Sound effects on the beats that matter.
+  useEffect(() => { if (soundOn && phase === 'buzzed') playBuzz() }, [phase, state?.winner, soundOn])
+  useEffect(() => {
+    if (!soundOn || phase !== 'reveal') return
+    state?.reveal?.who ? playDing() : playWomp()
+  }, [phase, soundOn])
+  // Ambient bed for the board; a tenser loop for Final; silence elsewhere.
+  useEffect(() => {
+    if (!soundOn) { stopMusic(); return }
+    if (['select', 'armed', 'reading'].includes(phase)) startMusic('bed')
+    else if (['final_wager', 'final_answer'].includes(phase)) startMusic('think')
+    else stopMusic()
+  }, [phase, soundOn])
 
   // Flip the "get ready" lockout to "buzzers open" the moment open_at passes.
   useEffect(() => {
@@ -24,22 +42,28 @@ export default function BuzzerTV({ gameId }) {
   const clue = currentClue(config, state)
   const open = state.phase === 'reading' && Date.now() >= new Date(state.open_at).getTime()
   const teams = config.settings?.teams || null
+  const theme = bzTheme(config)
 
   return (
-    <div className="bz" style={{ minHeight: '100vh', background: BZ.paper,
+    <div className="bz" style={{ minHeight: '100vh', background: BZ.paper, ...theme.vars,
       display: 'flex', flexDirection: 'column', padding: '28px clamp(16px,3vw,44px)', gap: 22 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div className="bz-fd" style={{ fontWeight: 600, fontSize: 26, color: BZ.plum }}>
-          Buzzed In <span style={{ color: BZ.muted, fontSize: 15, fontWeight: 700 }}>· {config.title || 'Game show'}</span>
+        <div className="bz-fd" style={{ fontWeight: 600, fontSize: 26, color: 'var(--bz-accent)' }}>
+          {theme.name}
         </div>
-        <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '.14em', textTransform: 'uppercase', color: BZ.muted }}>
-          on the big screen
-        </div>
+        <button onClick={() => { const on = !soundOn; setSoundOn(on); on ? enableAudio() : disableAudio() }}
+          style={{ border: `1.5px solid ${BZ.line}`, background: soundOn ? BZ.gold : '#fff', color: soundOn ? '#3a2a1a' : BZ.muted,
+            borderRadius: 20, padding: '7px 15px', fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>
+          {soundOn ? '🔊 Sound on' : '🔇 Sound off'}
+        </button>
       </div>
 
       <div style={{ flex: 1, display: 'grid', placeItems: 'center' }}>
         {state.phase === 'select' && <Board config={config} state={state} />}
         {state.phase === 'over' && <GameOver players={players} teams={teams} />}
+        {state.phase === 'armed' && clue && (
+          <ArmedCard category={config.board.categories[state.cur_cat]?.name} v={clue.v} />
+        )}
         {clue && ['reading', 'buzzed'].includes(state.phase) && (
           <ClueCard clue={clue} state={state} players={players} open={open} teams={teams} />
         )}
@@ -127,7 +151,7 @@ function BuzzedBanner({ state, players, teams }) {
 function DailyDouble({ clue, state, players }) {
   const showClue = state.phase === 'dd_answer'
   return (
-    <div style={{ width: '100%', maxWidth: 1000, background: `linear-gradient(160deg,${BZ.plum},${BZ.screen})`,
+    <div style={{ width: '100%', maxWidth: 1000, background: `linear-gradient(160deg,var(--bz-accent),${BZ.screen})`,
       border: `1px solid ${BZ.screenLine}`, borderRadius: 26, padding: 'clamp(28px,5vw,64px)',
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22, textAlign: 'center' }}>
       <div className="bz-fd bz-buzz" style={{ color: BZ.gold, fontWeight: 600, fontSize: 'clamp(30px,4vw,52px)' }}>
@@ -172,7 +196,7 @@ function GameOver({ players, teams }) {
   const top = ranked[0]
   return (
     <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center' }}>
-      <div className="bz-fd" style={{ fontSize: 'clamp(30px,4vw,52px)', fontWeight: 600, color: BZ.plum }}>
+      <div className="bz-fd" style={{ fontSize: 'clamp(30px,4vw,52px)', fontWeight: 600, color: 'var(--bz-accent)' }}>
         {top ? `${top.name} wins!` : 'Game over'}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 320 }}>
@@ -195,7 +219,7 @@ function FinalTV({ state, players, final }) {
   const wagered = players.filter(p => p.final_wager != null).length
   const answered = players.filter(p => p.final_answer != null).length
   const panel = children => (
-    <div style={{ width: '100%', maxWidth: 1000, background: `linear-gradient(160deg,${BZ.plum},${BZ.screen})`,
+    <div style={{ width: '100%', maxWidth: 1000, background: `linear-gradient(160deg,var(--bz-accent),${BZ.screen})`,
       border: `1px solid ${BZ.screenLine}`, borderRadius: 26, padding: 'clamp(28px,5vw,64px)',
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22, textAlign: 'center' }}>
       <div className="bz-fd bz-buzz" style={{ color: BZ.gold, fontWeight: 600, fontSize: 'clamp(26px,3.4vw,44px)' }}>Final Jeopardy</div>
@@ -213,15 +237,27 @@ function FinalTV({ state, players, final }) {
       <div className="bz-fd" style={{ color: BZ.cream, fontWeight: 500, fontSize: 'clamp(24px,3.4vw,44px)', lineHeight: 1.28, textWrap: 'balance' }}>{final?.clue}</div>
       <div style={{ color: '#e6d4ee', fontSize: 18, fontWeight: 700 }}>Answers locking in… ({answered}/{players.length})</div>
     </>)
-  const done = new Set(state.final_done || [])
-  const cur = players.filter(p => !done.has(p.player_id)).sort((a, b) => a.score - b.score)[0]
-  if (!cur) return panel(<div style={{ color: '#e6d4ee' }}>Revealing…</div>)
+  // Nothing shows until the host reveals a specific player (final_show).
+  const shown = state.final_show ? players.find(p => p.player_id === state.final_show) : null
+  if (!shown) return panel(<div style={{ color: '#e6d4ee', fontSize: 20, fontWeight: 700 }}>The answers are in — here we go…</div>)
   return panel(
-    <div className="bz-flip" key={cur.player_id} style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
-      <div className="bz-fd" style={{ color: BZ.cream, fontWeight: 600, fontSize: 'clamp(24px,3vw,38px)' }}>{cur.name}</div>
+    <div className="bz-flip" key={shown.player_id} style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
+      <div className="bz-fd" style={{ color: BZ.cream, fontWeight: 600, fontSize: 'clamp(24px,3vw,38px)' }}>{shown.name}</div>
       <div style={{ color: '#b7a9c0', fontSize: 14, fontWeight: 800, letterSpacing: '.18em', textTransform: 'uppercase' }}>wrote</div>
-      <div className="bz-fd" style={{ color: BZ.cream, fontWeight: 500, fontSize: 'clamp(26px,3.6vw,48px)', textWrap: 'balance' }}>{cur.final_answer || '—'}</div>
-      <div style={{ color: BZ.gold, fontSize: 18, fontWeight: 700 }}>Wagered {money(cur.final_wager || 0)}</div>
+      <div className="bz-fd" style={{ color: BZ.cream, fontWeight: 500, fontSize: 'clamp(26px,3.6vw,48px)', textWrap: 'balance' }}>{shown.final_answer || '—'}</div>
+      <div style={{ color: BZ.gold, fontSize: 18, fontWeight: 700 }}>Wagered {money(shown.final_wager || 0)}</div>
+    </div>
+  )
+}
+
+// The "get ready" card shown while a clue is armed but not yet read to the room.
+function ArmedCard({ category, v }) {
+  return (
+    <div style={{ width: '100%', maxWidth: 900, background: `linear-gradient(160deg,${BZ.screen2},${BZ.screen})`,
+      border: `1px solid ${BZ.screenLine}`, borderRadius: 26, padding: 'clamp(32px,6vw,72px)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, textAlign: 'center' }}>
+      <div className="bz-fd" style={{ color: BZ.gold, fontWeight: 600, fontSize: 'clamp(30px,4vw,52px)' }}>{category} · {money(v)}</div>
+      <div className="bz-buzz" style={{ color: '#b7a9c0', fontSize: 20, fontWeight: 700 }}>Get ready…</div>
     </div>
   )
 }

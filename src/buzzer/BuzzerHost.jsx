@@ -1,5 +1,5 @@
 import { useBuzzerGame, currentClue } from './useBuzzerGame'
-import { injectBuzzerCss, Scoreboard, playerColor, playerName, money, teamStandings } from './bzShared'
+import { injectBuzzerCss, Scoreboard, playerColor, playerName, money, teamStandings, bzTheme, useBzFont } from './bzShared'
 import { BZ, PLAYER_COLORS } from './board'
 
 // The host's controller. Runs the flow: pick (when in control), judge buzz-ins,
@@ -7,21 +7,23 @@ import { BZ, PLAYER_COLORS } from './board'
 export default function BuzzerHost({ gameId, hostKey }) {
   injectBuzzerCss()
   const { config, state, players, notFound, actions } = useBuzzerGame({ gameId, role: 'host', hostKey })
+  useBzFont(config?.settings?.theme?.font)
 
   if (notFound) return <Wrap>That game isn’t a buzzer game.</Wrap>
   if (!config || !state) return <Wrap>Loading…</Wrap>
 
   const clue = currentClue(config, state)
   const teams = config.settings?.teams || null
+  const theme = bzTheme(config)
   const btn = (bg) => ({ border: 0, borderRadius: 14, padding: '15px 20px', fontWeight: 800, fontSize: 16,
     color: '#fff', background: bg, cursor: 'pointer', fontFamily: 'inherit' })
 
   return (
-    <div className="bz" style={{ minHeight: '100vh', background: BZ.paper, padding: 'clamp(14px,3vw,28px)' }}>
+    <div className="bz" style={{ minHeight: '100vh', background: BZ.paper, ...theme.vars, padding: 'clamp(14px,3vw,28px)' }}>
       <div style={{ maxWidth: 860, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <div className="bz-fd" style={{ fontWeight: 600, fontSize: 22, color: BZ.plum }}>
-            Host controller <span style={{ color: BZ.muted, fontSize: 14, fontWeight: 700 }}>· {config.title}</span>
+          <div className="bz-fd" style={{ fontWeight: 600, fontSize: 22, color: 'var(--bz-accent)' }}>
+            {theme.name} <span style={{ color: BZ.muted, fontSize: 14, fontWeight: 700 }}>· host</span>
           </div>
           <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
             {['select', 'over'].includes(state.phase) && (
@@ -49,6 +51,15 @@ export default function BuzzerHost({ gameId, hostKey }) {
                   <MiniBoard config={config} state={state} onPick={(c, i) => actions.pick(c, i)} />
                 </>
               : <Waiting>{playerName(players, state.control)} is picking a clue…</Waiting>
+          )}
+
+          {/* ARMED — clue chosen; you read it, then reveal it to the room */}
+          {clue && state.phase === 'armed' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <Label>Read this, then show it on the screen</Label>
+              <ClueForHost clue={clue} />
+              <button style={btn('var(--bz-accent)')} onClick={() => actions.showClue()}>📺 Show clue on the TV &amp; open buzzers</button>
+            </div>
           )}
 
           {/* READING / BUZZED */}
@@ -80,7 +91,7 @@ export default function BuzzerHost({ gameId, hostKey }) {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                 {players.map((p, i) => (
                   <button key={p.player_id} onClick={() => actions.assignDD(p.player_id)}
-                    style={{ ...btn(PLAYER_COLORS[i % PLAYER_COLORS.length]) }}>{p.name}</button>
+                    style={{ ...btn(p.color || PLAYER_COLORS[i % PLAYER_COLORS.length]) }}>{p.name}</button>
                 ))}
               </div>
             </>
@@ -106,7 +117,7 @@ export default function BuzzerHost({ gameId, hostKey }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, textAlign: 'center' }}>
               <div style={{ color: BZ.muted, fontSize: 13, fontWeight: 800, letterSpacing: '.16em', textTransform: 'uppercase' }}>Answer</div>
               <div className="bz-fd" style={{ fontWeight: 600, fontSize: 24 }}>{state.reveal?.answer}</div>
-              <button style={btn(BZ.plum)} onClick={() => actions.next()}>Next clue →</button>
+              <button style={btn('var(--bz-accent)')} onClick={() => actions.next()}>Next clue →</button>
             </div>
           )}
 
@@ -138,10 +149,12 @@ export default function BuzzerHost({ gameId, hostKey }) {
                 <div style={{ fontSize: 12, color: BZ.muted, fontWeight: 800, letterSpacing: '.14em', textTransform: 'uppercase' }}>wrote</div>
                 <div className="bz-fd" style={{ fontWeight: 500, fontSize: 22 }}>{cur.final_answer || '—'}</div>
                 <div style={{ color: BZ.muted, fontWeight: 700 }}>Wagered {money(cur.final_wager || 0)} · has {money(cur.score)}</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <button style={btn(BZ.sageDeep)} onClick={() => actions.finalJudge(cur.player_id, true)}>Correct</button>
-                  <button style={btn(BZ.clay)} onClick={() => actions.finalJudge(cur.player_id, false)}>Incorrect</button>
-                </div>
+                {state.final_show !== cur.player_id
+                  ? <button style={btn('var(--bz-accent)')} onClick={() => actions.finalShow(cur.player_id)}>📺 Reveal {cur.name}’s answer on the screen</button>
+                  : <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <button style={btn(BZ.sageDeep)} onClick={() => actions.finalJudge(cur.player_id, true)}>Correct</button>
+                      <button style={btn(BZ.clay)} onClick={() => actions.finalJudge(cur.player_id, false)}>Incorrect</button>
+                    </div>}
               </div>
             )
           })()}
@@ -155,7 +168,7 @@ export default function BuzzerHost({ gameId, hostKey }) {
                 {win
                   ? <div className="bz-fd" style={{ fontWeight: 600, fontSize: 24 }}>🏆 {win.name} wins with {money(win.score)}!</div>
                   : <div className="bz-fd" style={{ fontWeight: 600, fontSize: 22 }}>That’s the game!</div>}
-                <button style={btn(BZ.plum)} onClick={() => actions.reset()}>Play again</button>
+                <button style={btn('var(--bz-accent)')} onClick={() => actions.reset()}>Play again</button>
               </div>
             )
           })()}

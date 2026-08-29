@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useBuzzerGame, currentClue } from './useBuzzerGame'
-import { injectBuzzerCss, playerColor, playerName, money, teamColor, teamOf } from './bzShared'
+import { injectBuzzerCss, playerColor, playerName, money, teamColor, teamOf, bzTheme, useBzFont } from './bzShared'
 import { MiniBoard } from './BuzzerHost'
-import { BZ } from './board'
+import { BZ, PLAYER_COLORS } from './board'
 
 // Each player's phone — their buzzer, and the board when they hold control.
 // Identity lives in sessionStorage (per tab) so a refresh keeps you, and two
@@ -20,6 +20,7 @@ export default function BuzzerPlayer({ gameId }) {
   // schedule a re-render for that moment — otherwise the buzzer stays "Get
   // ready…" until the next realtime update.
   const [, forceTick] = useState(0)
+  useBzFont(config?.settings?.theme?.font)
   useEffect(() => {
     if (state?.phase !== 'reading' || !state.open_at) return
     const ms = new Date(state.open_at).getTime() - Date.now()
@@ -30,7 +31,8 @@ export default function BuzzerPlayer({ gameId }) {
 
   if (notFound) return <Screen bg={BZ.paper}><Muted>That link isn’t a buzzer game.</Muted></Screen>
   if (!config || !state) return <Screen bg={BZ.paper}><Muted>Loading…</Muted></Screen>
-  if (!me) return <Join actions={actions} gameId={gameId} onJoined={setMe} teams={config.settings?.teams || null} />
+  const theme = bzTheme(config)
+  if (!me) return <Join actions={actions} gameId={gameId} onJoined={setMe} teams={config.settings?.teams || null} theme={theme} />
 
   const myColor = playerColor(players, me.player_id)
   const iControl = state.control === me.player_id
@@ -42,7 +44,7 @@ export default function BuzzerPlayer({ gameId }) {
   const myScore = myRow?.score ?? 0
 
   return (
-    <Screen bg={BZ.paper}>
+    <Screen bg={BZ.paper} vars={theme.vars}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
         <span style={{ width: 34, height: 34, borderRadius: '50%', background: myColor, color: '#fff',
           display: 'grid', placeItems: 'center', fontWeight: 800 }}>{me.name.slice(0, 1).toUpperCase()}</span>
@@ -63,6 +65,11 @@ export default function BuzzerPlayer({ gameId }) {
               <MiniBoard config={config} state={state} onPick={(c, i) => actions.pick(c, i)} />
             </div>
           : <Muted>{state.control === 'host' ? 'The host is picking…' : `${playerName(players, state.control)} is picking…`}</Muted>)}
+
+        {/* ARMED — clue picked, host about to read it. Buzzers not live yet. */}
+        {state.phase === 'armed' && (
+          <Buzzer disabled color="#c9bda6" label="Get ready…" sub="The host is about to read the clue" />
+        )}
 
         {/* READING — the buzzer */}
         {state.phase === 'reading' && (
@@ -220,15 +227,17 @@ function FinalAnswer({ final, onAnswer }) {
   )
 }
 
-function Join({ actions, gameId, onJoined, teams }) {
+function Join({ actions, gameId, onJoined, teams, theme }) {
+  const accent = theme?.accent || BZ.plum
   const [name, setName] = useState('')
   const [team, setTeam] = useState('')
+  const [color, setColor] = useState(PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)])
   const [busy, setBusy] = useState(false)
   const needTeam = teams && teams.length
   const go = async () => {
     if (!name.trim() || busy || (needTeam && !team)) return
     setBusy(true)
-    const res = await actions.join(name.trim(), needTeam ? team : null)
+    const res = await actions.join(name.trim(), needTeam ? team : null, color)
     if (res?.player_id) {
       const me = { player_id: res.player_id, player_key: res.player_key, name: name.trim() }
       sessionStorage.setItem(`bz:${gameId}`, JSON.stringify(me))
@@ -236,9 +245,9 @@ function Join({ actions, gameId, onJoined, teams }) {
     } else setBusy(false)
   }
   return (
-    <Screen bg={BZ.paper}>
+    <Screen bg={BZ.paper} vars={theme?.vars}>
       <div style={{ margin: 'auto', width: '100%', maxWidth: 380, textAlign: 'center' }}>
-        <div className="bz-fd" style={{ fontWeight: 600, fontSize: 34, color: BZ.plum }}>Buzzed In</div>
+        <div className="bz-fd" style={{ fontWeight: 600, fontSize: 34, color: accent }}>{theme?.name || 'Buzzed In'}</div>
         <div style={{ color: BZ.muted, marginBottom: 24, marginTop: 4 }}>This phone is your buzzer.</div>
         {needTeam && (
           <div style={{ textAlign: 'left', marginBottom: 18 }}>
@@ -257,6 +266,18 @@ function Join({ actions, gameId, onJoined, teams }) {
             </div>
           </div>
         )}
+        <div style={{ textAlign: 'left', marginBottom: 18 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.16em', textTransform: 'uppercase',
+            color: BZ.muted, marginBottom: 8 }}>Pick your color</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {PLAYER_COLORS.map(col => (
+              <button key={col} onClick={() => setColor(col)} aria-label={`color ${col}`}
+                style={{ width: 42, height: 42, borderRadius: '50%', background: col, cursor: 'pointer',
+                  border: color === col ? `3px solid ${BZ.ink}` : '3px solid transparent',
+                  boxShadow: color === col ? `0 0 0 2px ${col}` : 'none' }} />
+            ))}
+          </div>
+        </div>
         <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.16em', textTransform: 'uppercase',
           color: BZ.muted, textAlign: 'left', marginBottom: 8 }}>Your name</div>
         <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()}
@@ -264,7 +285,7 @@ function Join({ actions, gameId, onJoined, teams }) {
           style={{ width: '100%', border: `1.5px solid ${BZ.line}`, borderRadius: 15, padding: '14px 15px',
             fontSize: 16, fontFamily: 'inherit', background: '#fff', color: BZ.ink, marginBottom: 14 }} />
         <button onClick={go} disabled={!name.trim() || busy || (needTeam && !team)} style={{ width: '100%', border: 0, borderRadius: 16,
-          padding: 15, fontWeight: 800, fontSize: 16, color: '#fff', background: BZ.plum,
+          padding: 15, fontWeight: 800, fontSize: 16, color: '#fff', background: accent,
           opacity: (!name.trim() || busy || (needTeam && !team)) ? .5 : 1, cursor: 'pointer', fontFamily: 'inherit' }}>
           {busy ? 'Joining…' : 'Join the game →'}
         </button>
@@ -273,8 +294,8 @@ function Join({ actions, gameId, onJoined, teams }) {
   )
 }
 
-const Screen = ({ children, bg }) => (
-  <div className="bz" style={{ minHeight: '100vh', background: bg, padding: 'clamp(16px,5vw,24px)',
+const Screen = ({ children, bg, vars }) => (
+  <div className="bz" style={{ minHeight: '100vh', background: bg, ...vars, padding: 'clamp(16px,5vw,24px)',
     display: 'flex', flexDirection: 'column' }}>{children}</div>
 )
 const Muted = ({ children }) => (
