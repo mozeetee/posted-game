@@ -499,3 +499,92 @@ end $$;
 
 grant execute on all functions in schema public to anon, authenticated;
 notify pgrst, 'reload schema';
+-- ── Host-gated clue display + Final reveal + player color ────────────────────
+
+-- Player-chosen color, and Final-reveal "currently showing" pointer.
+alter table buzzer_players add column if not exists color text;
+alter table buzzer_state   add column if not exists final_show text;
+
+-- Join now also stores a chosen color.
+drop function if exists buzzer_join(text, text, text, text);
+create or replace function buzzer_join(p_game text, p_name text, p_team text default null,
+  p_avatar text default null, p_color text default null)
+returns json language plpgsql security definer as $$
+declare v_pid text; v_key text;
+begin
+  v_pid := replace(gen_random_uuid()::text, '-', '');
+  v_key := replace(gen_random_uuid()::text, '-', '');
+  insert into buzzer_players (game_id, player_id, name, team, avatar, color)
+    values (p_game, v_pid, p_name, p_team, p_avatar, p_color);
+  insert into buzzer_player_keys (game_id, player_id, player_key) values (p_game, v_pid, v_key);
+  insert into buzzer_state (game_id) values (p_game) on conflict (game_id) do nothing;
+  update buzzer_state set control = v_pid
+    where game_id = p_game and control = 'host'
+      and (select count(*) from buzzer_players where game_id = p_game) = 1;
+  return json_build_object('player_id', v_pid, 'player_key', v_key);
+end $$;
+
+-- Pick a clue → it "arms" (chosen but NOT shown to the room). The host reveals
+-- it with buzzer_show_clue when ready to read it. Daily Doubles are unchanged.
+create or replace function buzzer_pick(p_game text, p_actor text, p_key text, p_cat int, p_idx int)
+returns void language plpgsql security definer as $$
+declare st buzzer_state; is_dd boolean; ok boolean;
+begin
+  select * into st from buzzer_state where game_id = p_game for update;
+  if st.phase <> 'select' then return; end if;
+  if st.control = 'host' then ok := _buzzer_is_host(p_game, p_key);
+    else ok := (p_actor = st.control) and _buzzer_is_player(p_game, p_actor, p_key); end if;
+  if not ok then raise exception 'not your turn to pick'; end if;
+  if st.done @> to_jsonb(p_cat || '-' || p_idx) then return; end if;
+  select coalesce((data->'board'->'categories'->p_cat->'clues'->p_idx->>'dd')::boolean, false)
+    into is_dd from games where game_id = p_game;
+  update buzzer_state set
+    cur_cat = p_cat, cur_idx = p_idx, winner = null, missed = '[]'::jsonb, reveal = null, seq = seq + 1,
+    phase = case when is_dd then (case when st.control = 'host' then 'dd_assign' else 'dd_wager' end) else 'armed' end,
+    dd_player = case when is_dd and st.control <> 'host' then st.control else null end,
+    dd_wager = null, open_at = null, updated_at = now()
+  where game_id = p_game;
+end $$;
+
+-- Host reveals the armed clue to the room → buzzers unlock after the lockout.
+create or replace function buzzer_show_clue(p_game text, p_key text)
+returns void language plpgsql security definer as $$
+declare st buzzer_state;
+begin
+  if not _buzzer_is_host(p_game, p_key) then raise exception 'host only'; end if;
+  select * into st from buzzer_state where game_id = p_game for update;
+  if st.phase <> 'armed' then return; end if;
+  update buzzer_state set phase = 'reading',
+    open_at = now() + (lockout_ms || ' milliseconds')::interval, updated_at = now()
+  where game_id = p_game;
+end $$;
+
+-- Host reveals ONE player's Final answer to the room (nothing shows until this).
+create or replace function buzzer_final_show(p_game text, p_key text, p_player text)
+returns void language plpgsql security definer as $$
+begin
+  if not _buzzer_is_host(p_game, p_key) then raise exception 'host only'; end if;
+  update buzzer_state set final_show = p_player, updated_at = now()
+    where game_id = p_game and phase = 'final_reveal';
+end $$;
+
+-- Final judge now also clears the "showing" pointer as it advances.
+create or replace function buzzer_final_judge(p_game text, p_key text, p_player text, p_correct boolean)
+returns void language plpgsql security definer as $$
+declare v_wager int; v_pending int;
+begin
+  if not _buzzer_is_host(p_game, p_key) then raise exception 'host only'; end if;
+  if (select phase from buzzer_state where game_id = p_game) <> 'final_reveal' then return; end if;
+  if (select final_done from buzzer_state where game_id = p_game) @> to_jsonb(p_player) then return; end if;
+  select final_wager into v_wager from buzzer_players where game_id = p_game and player_id = p_player;
+  update buzzer_players set score = score + (case when p_correct then coalesce(v_wager,0) else -coalesce(v_wager,0) end)
+    where game_id = p_game and player_id = p_player;
+  update buzzer_state set final_done = final_done || to_jsonb(p_player), final_show = null, updated_at = now()
+    where game_id = p_game;
+  select count(*) into v_pending from buzzer_players bp where bp.game_id = p_game
+    and not ((select final_done from buzzer_state where game_id = p_game) @> to_jsonb(bp.player_id));
+  if v_pending = 0 then update buzzer_state set phase = 'over', updated_at = now() where game_id = p_game; end if;
+end $$;
+
+grant execute on all functions in schema public to anon, authenticated;
+notify pgrst, 'reload schema';

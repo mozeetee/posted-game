@@ -63,11 +63,15 @@ export function useBuzzerGame({ gameId, role, hostKey = '', playerId = '', playe
 
   // ── Actions (thin RPC wrappers) ──────────────────────────────────────────
   const actions = {
-    join: async (name, team, avatar) => {
+    join: async (name, team, color) => {
       const { data } = await supabase.rpc('buzzer_join',
-        { p_game: gameId, p_name: name, p_team: team || null, p_avatar: avatar || null })
+        { p_game: gameId, p_name: name, p_team: team || null, p_avatar: null, p_color: color || null })
       return data // { player_id, player_key }
     },
+    // Host reveals the armed clue to the room (buzzers unlock after the lockout).
+    showClue: async () => { await supabase.rpc('buzzer_show_clue', { p_game: gameId, p_key: hostKey }) },
+    // Host reveals one player's Final answer on the TV.
+    finalShow: async (pid) => { await supabase.rpc('buzzer_final_show', { p_game: gameId, p_key: hostKey, p_player: pid }) },
     // NB: supabase-js query builders are lazy — they only dispatch when awaited
     // (or .then()'d). These handlers are wired to onClick and their return value
     // is discarded, so each MUST await internally or the request never fires.
