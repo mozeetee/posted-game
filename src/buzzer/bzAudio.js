@@ -42,12 +42,33 @@ function blip(freqFrom, freqTo, start, dur, type = 'sine', peak = 0.3) {
   o.start(start); o.stop(start + dur + 0.02)
 }
 
-// Buzz-in: two quick descending square blips — an unmistakable "bzzt".
+// Buzz-in: a harsh electric game-buzzer "BZZZT" — a low, detuned sawtooth/square
+// tone run through a fast square-wave tremolo for that raspy lockout-buzzer bite.
 export function playBuzz() {
   if (!enabled || !ensure()) return
   const t = ctx.currentTime
-  blip(440, 300, t, 0.11, 'square', 0.34)
-  blip(320, 210, t + 0.1, 0.13, 'square', 0.34)
+  const dur = 0.42
+  const env = ctx.createGain()   // overall attack/hold/release
+  const rasp = ctx.createGain()  // tremolo makes it "buzz" rather than hum
+  env.connect(rasp); rasp.connect(master)
+  env.gain.setValueAtTime(0.0001, t)
+  env.gain.exponentialRampToValueAtTime(0.6, t + 0.006)
+  env.gain.setValueAtTime(0.6, t + dur - 0.05)
+  env.gain.exponentialRampToValueAtTime(0.0001, t + dur)
+  // Tremolo LFO chops the tone on/off ~34x a second → the classic buzzer rasp.
+  rasp.gain.value = 0.55
+  const lfo = ctx.createOscillator()
+  const lfoDepth = ctx.createGain()
+  lfo.type = 'square'; lfo.frequency.value = 34
+  lfoDepth.gain.value = 0.45
+  lfo.connect(lfoDepth); lfoDepth.connect(rasp.gain)
+  lfo.start(t); lfo.stop(t + dur)
+  // Two slightly detuned low, rich oscillators = a fat, angry buzzer tone.
+  ;[{ f: 138, type: 'sawtooth' }, { f: 142, type: 'square' }].forEach(o => {
+    const osc = ctx.createOscillator()
+    osc.type = o.type; osc.frequency.value = o.f
+    osc.connect(env); osc.start(t); osc.stop(t + dur)
+  })
 }
 
 // Correct answer: a bright two-note ping.
