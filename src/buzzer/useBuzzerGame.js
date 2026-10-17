@@ -75,9 +75,17 @@ export function useBuzzerGame({ gameId, role, hostKey = '', playerId = '', playe
     // NB: supabase-js query builders are lazy — they only dispatch when awaited
     // (or .then()'d). These handlers are wired to onClick and their return value
     // is discarded, so each MUST await internally or the request never fires.
-    pick: async (cat, idx) => { await supabase.rpc('buzzer_pick',
-      { p_game: gameId, p_actor: role === 'host' ? 'host' : playerId,
-        p_key: role === 'host' ? hostKey : playerKey, p_cat: cat, p_idx: idx }) },
+    // If I'm a player who holds control (including a host playing along), pick as
+    // that player; otherwise the host picks as 'host'.
+    pick: async (cat, idx) => {
+      const asPlayer = playerId && state?.control === playerId
+      await supabase.rpc('buzzer_pick', {
+        p_game: gameId,
+        p_actor: (role === 'host' && !asPlayer) ? 'host' : playerId,
+        p_key: (role === 'host' && !asPlayer) ? hostKey : playerKey,
+        p_cat: cat, p_idx: idx,
+      })
+    },
     buzz: async () => {
       const { data } = await supabase.rpc('buzzer_buzz',
         { p_game: gameId, p_player: playerId, p_key: playerKey })
