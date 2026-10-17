@@ -5,7 +5,7 @@ import { compressImage, readFileAsDataUrl } from './ImageUpload'
 import { DEFAULT_THEME, THEME_PRESETS, FONT_OPTIONS, getTheme, ensureGoogleFont, withAlpha, contrastColor, BRAND_NAME, BRAND_TAGLINE, EDITIONS, getEditionConfig, getBrandParts } from './theme'
 import PlayerRoom from './PlayerRoom'
 import { Avatar } from './Avatar'
-import { DEFAULT_BOARD } from './buzzer/board'
+import { BUZZER_PRESETS } from './buzzer/presets'
 
 const DASH_MODE_KEY = 'wpt_dash_mode'
 
@@ -69,6 +69,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   const [unlocked, setUnlocked] = useState(isHostMode || localStorage.getItem(ADMIN_UNLOCK_STORAGE_KEY) === ADMIN_PASSWORD_HASH)
   const [pwInput, setPwInput] = useState('')
   const [pwError, setPwError] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState(null)
   const [mockReturnScreen, setMockReturnScreen] = useState('manage')
@@ -354,11 +355,13 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
   // Buzzer edition is a different beast (three screens, a pre-filled board, live
   // state in its own tables). Create it straight into the DB, seed its state
   // row, and jump to the share screen — there's no questions editor for it yet.
-  async function startBuzzerGame() {
+  async function startBuzzerGame(presetId = 'party') {
+    const preset = BUZZER_PRESETS[presetId] || BUZZER_PRESETS.party
     const id = generateGameId()
     const data = {
-      id, title: 'Buzzed In game', hostKey: generateHostKey(), edition: 'buzzer',
-      gameType: 'buzzer', board: DEFAULT_BOARD, settings: { lockoutMs: 1000 },
+      id, title: preset.title, hostKey: generateHostKey(), edition: 'buzzer',
+      gameType: 'buzzer', board: preset.board,
+      settings: { lockoutMs: 1000, theme: preset.theme || {} },
       status: 'lobby', createdAt: Date.now(),
     }
     const { error } = await supabase.from('games').insert({ game_id: id, data })
@@ -802,8 +805,11 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
           <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 10, padding: 16 }}>
             <h2 style={{ ...s.sectionTitle, marginBottom: 12 }}>CHOOSE AN EDITION</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {Object.values(EDITIONS).map(ed => (
-                <button key={ed.id} style={{ display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 14, padding: '14px 16px', cursor: 'pointer', color: c.text, fontFamily: "'Nunito Sans', sans-serif" }} onClick={() => ed.id === 'buzzer' ? startBuzzerGame() : startNewGame(ed.id)}>
+              {[
+                ...Object.values(EDITIONS).filter(ed => ed.id !== 'buzzer').map(ed => ({ ...ed, onPick: () => startNewGame(ed.id) })),
+                ...Object.values(BUZZER_PRESETS).map(p => ({ ...p, onPick: () => startBuzzerGame(p.id) })),
+              ].map(ed => (
+                <button key={ed.id} style={{ display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 14, padding: '14px 16px', cursor: 'pointer', color: c.text, fontFamily: "'Nunito Sans', sans-serif" }} onClick={ed.onPick}>
                   <span style={{ fontSize: 26 }}>{ed.emoji}</span>
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                     <span style={{ fontWeight: 800, fontSize: 15 }}>{ed.label}</span>
@@ -830,9 +836,20 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                         <span style={s.meta}>{g.questionCount} Qs · {g.playerCount} players</span>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 12 }}>
-                      <button style={s.ghost} onClick={() => openManage(g.id)}>Manage</button>
-                      <button style={{ ...s.ghost, color: c.danger }} onClick={() => deleteGame(g.id)}>Delete</button>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                      {confirmDeleteId === g.id ? (
+                        <>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: c.textMuted }}>Delete this game?</span>
+                          <button style={s.ghost} onClick={() => setConfirmDeleteId(null)}>Cancel</button>
+                          <button style={{ ...s.ghost, color: '#fff', background: c.danger, borderColor: c.danger }}
+                            onClick={() => { setConfirmDeleteId(null); deleteGame(g.id) }}>Delete</button>
+                        </>
+                      ) : (
+                        <>
+                          <button style={s.ghost} onClick={() => openManage(g.id)}>Manage</button>
+                          <button style={{ ...s.ghost, color: c.danger }} onClick={() => setConfirmDeleteId(g.id)}>Delete</button>
+                        </>
+                      )}
                     </div>
                   </div>
                 )
