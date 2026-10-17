@@ -45,24 +45,24 @@ function blip(freqFrom, freqTo, start, dur, type = 'sine', peak = 0.3) {
   o.start(start); o.stop(start + dur + 0.02)
 }
 
-// Buzz-in: a short electric game-buzzer, softened — lower, gentler attack, and a
-// milder tremolo so it reads as a buzzer without being loud or jarring.
+// Buzz-in: an electric game-buzzer — clearly audible, but with a gentler attack
+// and milder tremolo than a harsh raw buzzer so it's present without being jarring.
 export function playBuzz() {
   if (!enabled || !ensure()) return
   const t = ctx.currentTime
-  const dur = 0.3
+  const dur = 0.42
   const env = ctx.createGain()
   const rasp = ctx.createGain()
   env.connect(rasp); rasp.connect(master)
   env.gain.setValueAtTime(0.0001, t)
-  env.gain.exponentialRampToValueAtTime(0.36, t + 0.02)   // softer peak + slower attack
-  env.gain.setValueAtTime(0.36, t + dur - 0.09)
+  env.gain.exponentialRampToValueAtTime(0.62, t + 0.02)   // soft-ish attack, full level
+  env.gain.setValueAtTime(0.62, t + dur - 0.1)
   env.gain.exponentialRampToValueAtTime(0.0001, t + dur)
-  rasp.gain.value = 0.62
+  rasp.gain.value = 0.72
   const lfo = ctx.createOscillator()
   const lfoDepth = ctx.createGain()
-  lfo.type = 'square'; lfo.frequency.value = 26
-  lfoDepth.gain.value = 0.26                              // milder chop = less abrupt
+  lfo.type = 'square'; lfo.frequency.value = 24
+  lfoDepth.gain.value = 0.3                               // mild chop = buzzer, not jarring
   lfo.connect(lfoDepth); lfoDepth.connect(rasp.gain)
   lfo.start(t); lfo.stop(t + dur)
   ;[{ f: 150, type: 'sawtooth' }, { f: 153, type: 'square' }].forEach(o => {
@@ -76,21 +76,21 @@ export function playBuzz() {
 export function playDailyDouble() {
   if (!enabled || !ensure()) return
   const t = ctx.currentTime
-  ;[523.3, 659.3, 784.0, 1046.5].forEach((f, i) => blip(f, f, t + i * 0.1, 0.5, 'triangle', 0.14))
-  blip(1318.5, 1318.5, t + 0.44, 0.6, 'sine', 0.1)
+  ;[523.3, 659.3, 784.0, 1046.5].forEach((f, i) => blip(f, f, t + i * 0.1, 0.5, 'triangle', 0.2))
+  blip(1318.5, 1318.5, t + 0.44, 0.6, 'sine', 0.16)
 }
 
 // Correct: a bright two-note ping. Wrong / miss: a short low "womp".
 export function playDing() {
   if (!enabled || !ensure()) return
   const t = ctx.currentTime
-  blip(660, 660, t, 0.14, 'triangle', 0.22)
-  blip(990, 990, t + 0.11, 0.22, 'triangle', 0.2)
+  blip(660, 660, t, 0.14, 'triangle', 0.32)
+  blip(990, 990, t + 0.11, 0.22, 'triangle', 0.3)
 }
 export function playWomp() {
   if (!enabled || !ensure()) return
   const t = ctx.currentTime
-  blip(200, 120, t, 0.3, 'sawtooth', 0.16)
+  blip(200, 120, t, 0.3, 'sawtooth', 0.26)
 }
 
 // Ambient music beds — slow, low, and quiet. `pick` plays while choosing from
