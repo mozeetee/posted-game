@@ -13,7 +13,7 @@ export function bzTheme(config) {
   const t = config?.settings?.theme || {}
   const accent = t.accent || BZ.plum
   const font = t.font || 'Fredoka'
-  return { accent, font, name: config?.title || 'Buzzed In',
+  return { accent, font, name: config?.title || 'Buzzed In', decor: t.decor || null,
     vars: { '--bz-accent': accent, '--bz-fd': `'${font}'` } }
 }
 // Load a themed display font once it's known (no-op for the default).
@@ -91,7 +91,12 @@ const CSS = `
 .bz-lockbar{height:6px;border-radius:6px;background:#4d3a54;overflow:hidden}
 .bz-lockbar>i{display:block;height:100%;background:${BZ.gold};animation:bzlock var(--ms,1000ms) linear forwards}
 @keyframes bzlock{from{width:0}to{width:100%}}
+.bz-decor{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+.bz-decor>span{position:absolute;bottom:-12vh;will-change:transform;animation:bzfloat linear infinite}
+@keyframes bzfloat{0%{transform:translateY(0) rotate(-8deg);opacity:0}
+  12%{opacity:.5}88%{opacity:.5}100%{transform:translateY(-120vh) rotate(10deg);opacity:0}}
 @media (prefers-reduced-motion: reduce){
+  .bz-decor>span{animation:none;display:none}
   .bz-flip,.bz-buzz{animation:none}
   .bz-lockbar>i{animation:none;width:100%}
 }
@@ -126,7 +131,7 @@ export function Scoreboard({ players, control, dark = false, teams = null }) {
               <span className="bz-num bz-fd" style={{ fontWeight: 600, fontSize: 18, marginLeft: 4,
                 color: total < 0 ? BZ.clay : (dark ? BZ.gold : BZ.goldDeep) }}>{money(total)}</span>
               {inControl && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em',
-                textTransform: 'uppercase', color: BZ.goldDeep }}>picks</span>}
+                textTransform: 'uppercase', color: BZ.goldDeep }}>picks next</span>}
             </div>
           )
         })}
@@ -155,7 +160,7 @@ export function Scoreboard({ players, control, dark = false, teams = null }) {
             <span className="bz-num bz-fd" style={{ fontWeight: 600, fontSize: 18,
               color: p.score < 0 ? BZ.clay : (dark ? BZ.gold : BZ.goldDeep) }}>{money(p.score)}</span>
             {inControl && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em',
-              textTransform: 'uppercase', color: BZ.goldDeep }}>picks</span>}
+              textTransform: 'uppercase', color: BZ.goldDeep }}>picks next</span>}
           </div>
         )
       })}

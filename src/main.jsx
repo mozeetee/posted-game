@@ -9,6 +9,7 @@ import GuestSurvey from './GuestSurvey'
 import BuzzerTV from './buzzer/BuzzerTV'
 import BuzzerHost from './buzzer/BuzzerHost'
 import BuzzerPlayer from './buzzer/BuzzerPlayer'
+import BuzzerJoin from './buzzer/BuzzerJoin'
 
 // Read the query string defensively. Links we share (host/player/screen/bride)
 // all separate params with "&", and email/messaging/notes apps sometimes mangle
@@ -31,11 +32,19 @@ function App() {
   const params = getParams()
   const role = params.get('role')
   const gameId = params.get('game')
+  const path = typeof window !== 'undefined' ? window.location.pathname : '/'
 
-  // Buzzer edition (three screens). Its links carry &gt=buzzer so we route to
+  // Guests who can't scan the QR go to <domain>/play and type the short code,
+  // which sends them to the player buzzer link below.
+  if (path.replace(/\/+$/, '') === '/play' && !gameId) {
+    return <BuzzerJoin initialCode={(params.get('code') || '').toUpperCase()} />
+  }
+
+  // Buzzer edition (three screens). Its links carry type=buzzer so we route to
   // the game-show views: role=tv (cast display), role=host (controller +&key),
-  // role=player (each phone's buzzer, the default).
-  if (params.get('gt') === 'buzzer' && gameId) {
+  // role=player (each phone's buzzer, the default). We still accept the old
+  // "gt=buzzer" spelling so links shared before the rename keep working.
+  if ((params.get('type') === 'buzzer' || params.get('gt') === 'buzzer') && gameId) {
     if (role === 'tv') return <BuzzerTV gameId={gameId} />
     if (role === 'host') return <BuzzerHost gameId={gameId} hostKey={params.get('key') || ''} />
     return <BuzzerPlayer gameId={gameId} />

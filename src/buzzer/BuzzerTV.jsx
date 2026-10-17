@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import QRCode from 'qrcode'
 import { useBuzzerGame, currentClue } from './useBuzzerGame'
 import { injectBuzzerCss, Scoreboard, playerColor, playerName, money, teamOf, teamColor, teamStandings, bzTheme, useBzFont } from './bzShared'
 import { BZ } from './board'
@@ -28,18 +29,21 @@ export default function BuzzerTV({ gameId }) {
   const teams = config.settings?.teams || null
   const theme = bzTheme(config)
 
+  const spooky = theme.decor === 'halloween'
+
   return (
-    <div className="bz" style={{ minHeight: '100vh', background: BZ.paper, ...theme.vars,
-      display: 'flex', flexDirection: 'column', padding: '28px clamp(16px,3vw,44px)', gap: 22 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div className="bz-fd" style={{ fontWeight: 600, fontSize: 26, color: 'var(--bz-accent)' }}>
+    <div className="bz" style={{ position: 'relative', minHeight: '100vh', background: BZ.paper, ...theme.vars,
+      display: 'flex', flexDirection: 'column', padding: '28px clamp(16px,3vw,44px)', gap: 22, overflow: 'hidden' }}>
+      {spooky && state.phase === 'lobby' && <HalloweenDecor />}
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <div className="bz-fd" style={{ fontWeight: 600, fontSize: 'clamp(26px,3vw,44px)', color: 'var(--bz-accent)' }}>
           {theme.name}
         </div>
       </div>
 
-      <div style={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-        {state.phase === 'lobby' && <Lobby config={config} players={players} gameId={gameId} />}
-        {state.phase === 'select' && <Board config={config} state={state} />}
+      <div style={{ position: 'relative', zIndex: 1, flex: 1, display: 'grid', placeItems: 'center' }}>
+        {state.phase === 'lobby' && <Lobby config={config} players={players} gameId={gameId} spooky={spooky} />}
+        {state.phase === 'select' && <Board config={config} state={state} players={players} />}
         {state.phase === 'over' && <GameOver players={players} teams={teams} />}
         {state.phase === 'armed' && clue && (
           <ArmedCard category={config.board.categories[state.cur_cat]?.name} v={clue.v} />
@@ -56,46 +60,97 @@ export default function BuzzerTV({ gameId }) {
         )}
       </div>
 
-      <Scoreboard players={players} control={state.control} dark={false} teams={teams} />
+      {/* Scoreboard is hidden in the lobby — players already show as join chips
+          there; showing them twice is just noise until the game starts. */}
+      {state.phase !== 'lobby' && (
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <Scoreboard players={players} control={state.control} dark={false} teams={teams} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Slow drifting Halloween emoji behind the lobby — some life on the screen
+// guests stare at while they join. Hidden under prefers-reduced-motion (CSS).
+function HalloweenDecor() {
+  const bits = [
+    { e: '🎃', left: '6%', size: 54, dur: 15, delay: 0 },
+    { e: '👻', left: '20%', size: 40, dur: 19, delay: 4 },
+    { e: '🦇', left: '38%', size: 34, dur: 13, delay: 2 },
+    { e: '🕸️', left: '52%', size: 44, dur: 21, delay: 7 },
+    { e: '🍬', left: '68%', size: 32, dur: 16, delay: 1 },
+    { e: '🦇', left: '82%', size: 38, dur: 12, delay: 5 },
+    { e: '🎃', left: '93%', size: 46, dur: 18, delay: 3 },
+  ]
+  return (
+    <div className="bz-decor" aria-hidden="true">
+      {bits.map((b, i) => (
+        <span key={i} style={{ left: b.left, fontSize: b.size,
+          animationDuration: `${b.dur}s`, animationDelay: `${b.delay}s` }}>{b.e}</span>
+      ))}
     </div>
   )
 }
 
 function Lobby({ config, players, gameId }) {
-  const joinUrl = `${location.origin}/?game=${gameId}&gt=buzzer`.replace(/^https?:\/\//, '')
+  const joinUrl = `${location.origin}/?game=${gameId}&type=buzzer`
+  const joinHost = location.host
+  const [qr, setQr] = useState('')
+  useEffect(() => {
+    QRCode.toDataURL(joinUrl, { width: 480, margin: 1, color: { dark: '#2a1f30', light: '#ffffff' } })
+      .then(setQr).catch(() => {})
+  }, [joinUrl])
   return (
-    <div style={{ width: '100%', maxWidth: 900, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 22 }}>
+    <div style={{ width: '100%', maxWidth: 1100, textAlign: 'center', display: 'flex', flexDirection: 'column',
+      gap: 'clamp(18px,3vh,34px)', alignItems: 'center' }}>
       {config.settings?.welcome
-        ? <div className="bz-fd" style={{ color: BZ.ink, fontWeight: 500, fontSize: 'clamp(22px,3vw,38px)', whiteSpace: 'pre-wrap', lineHeight: 1.3 }}>{config.settings.welcome}</div>
-        : <div className="bz-fd" style={{ color: 'var(--bz-accent)', fontWeight: 600, fontSize: 'clamp(26px,3.4vw,44px)' }}>Get ready to play!</div>}
-      <div style={{ color: BZ.muted, fontSize: 18, fontWeight: 700 }}>
-        Join on your phone at <span style={{ color: BZ.ink, fontWeight: 800 }}>{joinUrl}</span>
+        ? <div className="bz-fd" style={{ color: BZ.ink, fontWeight: 600, fontSize: 'clamp(26px,3.6vw,52px)', whiteSpace: 'pre-wrap', lineHeight: 1.2 }}>{config.settings.welcome}</div>
+        : <div className="bz-fd" style={{ color: 'var(--bz-accent)', fontWeight: 600, fontSize: 'clamp(30px,4.4vw,64px)' }}>Get ready to play!</div>}
+
+      {/* Join card: scan the QR, or type the short code at <host>/play */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'clamp(20px,4vw,56px)', alignItems: 'center', justifyContent: 'center',
+        background: '#fff', border: `1px solid ${BZ.line}`, borderRadius: 28, padding: 'clamp(20px,3vw,40px)' }}>
+        {qr && <img src={qr} alt="Scan to join" width={300} height={300}
+          style={{ width: 'clamp(200px,22vw,340px)', height: 'auto', borderRadius: 16, display: 'block' }} />}
+        <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ color: BZ.muted, fontWeight: 800, fontSize: 'clamp(16px,1.6vw,24px)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Scan to join</div>
+          <div style={{ color: BZ.muted, fontWeight: 700, fontSize: 'clamp(15px,1.4vw,22px)' }}>
+            or go to <span style={{ color: BZ.ink, fontWeight: 800 }}>{joinHost}/play</span> and enter:
+          </div>
+          <div className="bz-fd bz-num" style={{ color: 'var(--bz-accent)', fontWeight: 700, lineHeight: 1,
+            fontSize: 'clamp(48px,8vw,128px)', letterSpacing: '.06em' }}>{gameId}</div>
+        </div>
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center' }}>
+
+      {/* Players who have joined (shown once — the score bar is hidden until play) */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'clamp(10px,1.2vw,16px)', justifyContent: 'center' }}>
         {players.length === 0
-          ? <div style={{ color: BZ.muted, fontSize: 16 }}>Waiting for players…</div>
+          ? <div style={{ color: BZ.muted, fontSize: 'clamp(16px,1.6vw,24px)', fontWeight: 700 }}>Waiting for players…</div>
           : players.map(p => (
-              <div key={p.player_id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff',
-                border: `1px solid ${BZ.line}`, borderRadius: 30, padding: '9px 18px 9px 10px' }}>
-                <span style={{ width: 30, height: 30, borderRadius: '50%', background: p.color || BZ.plum, color: '#fff',
-                  display: 'grid', placeItems: 'center', fontWeight: 800 }}>{p.name.trim().slice(0, 1).toUpperCase()}</span>
-                <span style={{ fontWeight: 700, color: BZ.ink }}>{p.name}</span>
+              <div key={p.player_id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff',
+                border: `1px solid ${BZ.line}`, borderRadius: 40, padding: 'clamp(8px,1vw,12px) clamp(16px,1.6vw,26px) clamp(8px,1vw,12px) clamp(8px,0.8vw,12px)' }}>
+                <span style={{ width: 'clamp(34px,3vw,52px)', height: 'clamp(34px,3vw,52px)', borderRadius: '50%', background: p.color || BZ.plum, color: '#fff',
+                  display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 'clamp(16px,1.6vw,24px)', flex: 'none' }}>{p.name.trim().slice(0, 1).toUpperCase()}</span>
+                <span style={{ fontWeight: 700, color: BZ.ink, fontSize: 'clamp(18px,1.8vw,28px)' }}>{p.name}</span>
               </div>
             ))}
       </div>
-      <div style={{ color: BZ.muted, fontWeight: 700 }}>The host will start the game soon…</div>
+      <div style={{ color: BZ.muted, fontWeight: 700, fontSize: 'clamp(15px,1.5vw,22px)' }}>The host will start the game soon…</div>
     </div>
   )
 }
 
-function Board({ config, state }) {
+function Board({ config, state, players }) {
   const done = new Set(state.done || [])
+  const first = done.size === 0
+  const picker = state.control === 'host' ? 'The host' : playerName(players, state.control)
   return (
     <div style={{ width: '100%', maxWidth: 1300 }}>
-      <div style={{ textAlign: 'center', marginBottom: 16, color: BZ.muted, fontSize: 17, fontWeight: 700 }}>
-        {state.control === 'host'
-          ? 'Host, pick the first clue.'
-          : 'Board control — pick a clue from your phone.'}
+      <div style={{ textAlign: 'center', marginBottom: 16, color: BZ.ink, fontSize: 'clamp(18px,2vw,30px)', fontWeight: 700 }}>
+        <span className="bz-fd" style={{ color: 'var(--bz-accent)', fontWeight: 600 }}>{picker}</span>
+        {first ? ' picks the first clue' : ' picks the next clue'}
+        {state.control !== 'host' && <span style={{ color: BZ.muted, fontWeight: 600 }}> — from their phone</span>}
       </div>
       <div className="bz-board">
         {config.board.categories.map((cat, ci) => (
