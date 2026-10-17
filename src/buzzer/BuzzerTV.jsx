@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useBuzzerGame, currentClue } from './useBuzzerGame'
 import { injectBuzzerCss, Scoreboard, playerColor, playerName, money, teamOf, teamColor, teamStandings, bzTheme, useBzFont } from './bzShared'
 import { BZ } from './board'
-import { enableAudio, disableAudio, playBuzz, playDing, playWomp, startMusic, stopMusic } from './bzAudio'
+import { enableAudio, disableAudio, playBuzz, playDing, playWomp, playDailyDouble, startMusic, stopMusic } from './bzAudio'
 
 // The cast-to-TV screen. Display only — no controls. Reacts live to state.
 export default function BuzzerTV({ gameId }) {
@@ -13,19 +13,32 @@ export default function BuzzerTV({ gameId }) {
   const phase = state?.phase
   useBzFont(config?.settings?.theme?.font)
 
-  // Sound effects on the beats that matter.
-  useEffect(() => { if (soundOn && phase === 'buzzed') playBuzz() }, [phase, state?.winner, soundOn])
+  // One-shot sound effects, fired only on the transition into a phase (a ref
+  // tracks the previous phase so a re-render on the same phase won't replay).
+  const prevPhaseRef = useRef(null)
+  const ddPhases = ['dd_assign', 'dd_wager', 'dd_answer']
   useEffect(() => {
-    if (!soundOn || phase !== 'reveal') return
-    state?.reveal?.who ? playDing() : playWomp()
+    if (soundOn) {
+      const prev = prevPhaseRef.current
+      if (phase === 'buzzed' && prev !== 'buzzed') playBuzz()
+      else if (ddPhases.includes(phase) && !ddPhases.includes(prev)) playDailyDouble()
+      else if (phase === 'reveal' && prev !== 'reveal') (state?.reveal?.who ? playDing() : playWomp())
+    }
+    prevPhaseRef.current = phase
   }, [phase, soundOn])
-  // Ambient bed for the board; a tenser loop for Final; silence elsewhere.
+
+  // Ambient background music that changes with the moment: a calm bed while
+  // picking from the board, a tenser loop once a clue is on screen, and a
+  // "thinking" loop for Final. Themed packs (e.g. Halloween) swap in a spooky
+  // variant via settings.theme.music.
   useEffect(() => {
     if (!soundOn) { stopMusic(); return }
-    if (['select', 'armed', 'reading'].includes(phase)) startMusic('bed')
-    else if (['final_wager', 'final_answer'].includes(phase)) startMusic('think')
+    const music = config?.settings?.theme?.music || 'default'
+    if (phase === 'select') startMusic('pick', music)
+    else if (['armed', 'reading', 'buzzed'].includes(phase)) startMusic('clue', music)
+    else if (['final_wager', 'final_answer'].includes(phase)) startMusic('think', music)
     else stopMusic()
-  }, [phase, soundOn])
+  }, [phase, soundOn, config?.settings?.theme?.music])
 
   // Flip the "get ready" lockout to "buzzers open" the moment open_at passes.
   useEffect(() => {

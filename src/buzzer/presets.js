@@ -68,6 +68,6 @@ export const BUZZER_PRESETS = {
   halloween: {
     id: 'halloween', label: 'Buzzed In · Halloween', emoji: '🎃',
     blurb: 'Spooky clues — horror movies, candy, traditions & more. Ready to play.',
-    title: 'Halloween Buzzed In', theme: { accent: '#e07b2f' }, board: HALLOWEEN_BOARD,
+    title: 'Halloween Buzzed In', theme: { accent: '#e07b2f', music: 'spooky' }, board: HALLOWEEN_BOARD,
   },
 }
