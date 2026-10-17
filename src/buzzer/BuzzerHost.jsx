@@ -1,14 +1,47 @@
+import { useState, useEffect, useRef } from 'react'
 import { useBuzzerGame, currentClue } from './useBuzzerGame'
 import { injectBuzzerCss, Scoreboard, playerColor, playerName, money, teamStandings, bzTheme, useBzFont } from './bzShared'
 import { BZ, PLAYER_COLORS } from './board'
+import { enableAudio, disableAudio, playBuzz, playDing, playWomp, playDailyDouble, startMusic, stopMusic } from './bzAudio'
 
 // The host's controller. Runs the flow: pick (when in control), judge buzz-ins,
 // resolve Daily Doubles, reveal, advance. The host is the referee — they decide
 // right/wrong, so they don't play as a contestant. Sees the answers; players don't.
+// Audio (buzz/music/Daily Double) plays here, from the person running the game,
+// with a sound on/off toggle — the TV screen stays silent.
 export default function BuzzerHost({ gameId, hostKey }) {
   injectBuzzerCss()
   const { config, state, players, notFound, actions } = useBuzzerGame({ gameId, role: 'host', hostKey })
   useBzFont(config?.settings?.theme?.font)
+
+  // Sound runs from the host's controller. Off by default; browsers need a
+  // click (the toggle) before any audio can play.
+  const [soundOn, setSoundOn] = useState(false)
+  const phase = state?.phase
+  const prevPhaseRef = useRef(null)
+  const ddPhases = ['dd_assign', 'dd_wager', 'dd_answer']
+  // One-shot effects, fired only on the transition into a phase (a ref tracks
+  // the previous phase so a re-render on the same phase won't replay).
+  useEffect(() => {
+    if (soundOn) {
+      const prev = prevPhaseRef.current
+      if (phase === 'buzzed' && prev !== 'buzzed') playBuzz()
+      else if (ddPhases.includes(phase) && !ddPhases.includes(prev)) playDailyDouble()
+      else if (phase === 'reveal' && prev !== 'reveal') (state?.reveal?.who ? playDing() : playWomp())
+    }
+    prevPhaseRef.current = phase
+  }, [phase, soundOn])
+  // Ambient background music by moment: a calm bed while picking from the board,
+  // a tenser loop once a clue is on screen, a "thinking" loop for Final. Themed
+  // packs (e.g. Halloween) swap in a spooky variant via settings.theme.music.
+  useEffect(() => {
+    if (!soundOn) { stopMusic(); return }
+    const music = config?.settings?.theme?.music || 'default'
+    if (phase === 'select') startMusic('pick', music)
+    else if (['armed', 'reading', 'buzzed'].includes(phase)) startMusic('clue', music)
+    else if (['final_wager', 'final_answer'].includes(phase)) startMusic('think', music)
+    else stopMusic()
+  }, [phase, soundOn, config?.settings?.theme?.music])
 
   if (notFound) return <Wrap>That game isn’t a buzzer game.</Wrap>
   if (!config || !state) return <Wrap>Loading…</Wrap>
@@ -27,6 +60,11 @@ export default function BuzzerHost({ gameId, hostKey }) {
             {theme.name} <span style={{ color: BZ.muted, fontSize: 14, fontWeight: 700 }}>· host</span>
           </div>
           <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            <button onClick={() => { const on = !soundOn; setSoundOn(on); on ? enableAudio() : disableAudio() }}
+              style={{ border: `1.5px solid ${BZ.line}`, background: soundOn ? BZ.gold : '#fff', color: soundOn ? '#3a2a1a' : BZ.muted,
+                borderRadius: 20, padding: '6px 13px', fontSize: 12, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>
+              {soundOn ? '🔊 Sound on' : '🔇 Sound off'}
+            </button>
             {['select', 'over'].includes(state.phase) && (
               <button onClick={() => { if (confirm('Start Final Jeopardy now?')) actions.finalStart() }}
                 style={{ background: BZ.gold, border: 'none', color: '#fff', cursor: 'pointer', fontSize: 13,
