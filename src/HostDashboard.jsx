@@ -1696,9 +1696,9 @@ function buildDashTheme(mode, edition) {
 function BuzzerManage({ game, s, c, isHostMode, onHome, onToggleMode, dashMode }) {
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
   const links = [
-    { key: 'tv', label: 'CAST TO THE TV', hint: 'Open on the TV (or a laptop plugged into it). Display only — no controls.', url: `${origin}/?game=${game.id}&gt=buzzer&role=tv`, open: true },
-    { key: 'host', label: 'HOST CONTROLLER — FOR YOU', hint: 'Your private controller: reveal clues, judge answers, keep the game moving.', url: `${origin}/?game=${game.id}&gt=buzzer&role=host&key=${game.hostKey || ''}`, open: true },
-    { key: 'player', label: "PLAYERS' BUZZERS", hint: 'Send this to every guest — their phone becomes their buzzer.', url: `${origin}/?game=${game.id}&gt=buzzer`, open: false },
+    { key: 'tv', label: 'CAST TO THE TV', hint: 'Open on the TV (or a laptop plugged into it). Display only — no controls.', url: `${origin}/?game=${game.id}&type=buzzer&role=tv`, open: true },
+    { key: 'host', label: 'HOST CONTROLLER — FOR YOU', hint: 'Your private controller: reveal clues, judge answers, keep the game moving.', url: `${origin}/?game=${game.id}&type=buzzer&role=host&key=${game.hostKey || ''}`, open: true },
+    { key: 'player', label: "PLAYERS' BUZZERS", hint: 'Send this to every guest — their phone becomes their buzzer.', url: `${origin}/?game=${game.id}&type=buzzer`, open: false },
   ]
   const [copied, setCopied] = useState('')
   const copy = async (k, url) => { try { await navigator.clipboard.writeText(url); setCopied(k); setTimeout(() => setCopied(''), 1600) } catch {} }
