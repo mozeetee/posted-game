@@ -32,7 +32,10 @@ export async function compressImage(dataUrl, maxDim = 900) {
 // the image is saved — this guarantees the framing the host picks is exactly what
 // players see everywhere the image is displayed. Omit it for images that are shown
 // with objectFit:'contain' or as a full-bleed background, where cropping doesn't apply.
-export function ImageUploadSlot({ label, hint, value, onChange, accentColor = '#ffd166', maxDim = 900, cropAspect = null }) {
+// Colors default to a light "paper" look that reads on the cream boutique
+// theme; callers on a dark surface pass their own surface/text/border.
+export function ImageUploadSlot({ label, hint, value, onChange, accentColor = '#ffd166', maxDim = 900, cropAspect = null,
+  surface = '#fffdf7', text = '#5a4f45', textFaint = '#8a7d6e', border = null }) {
   const inputRef = useRef(null)
   const [cropSrc, setCropSrc] = useState(null)
 
@@ -57,10 +60,10 @@ export function ImageUploadSlot({ label, hint, value, onChange, accentColor = '#
 
   return (
     <div style={{ marginBottom: 18 }}>
-      <label style={{ display: 'block', fontSize: 10, letterSpacing: 2, color: '#555', marginBottom: 6, fontWeight: 700 }}>
+      <label style={{ display: 'block', fontSize: 10, letterSpacing: 2, color: textFaint, marginBottom: 6, fontWeight: 700 }}>
         {label}
       </label>
-      {hint && <div style={{ fontSize: 11, color: '#444', marginBottom: 8 }}>{hint}</div>}
+      {hint && <div style={{ fontSize: 11, color: textFaint, marginBottom: 8, lineHeight: 1.5 }}>{hint}</div>}
       {value ? (
         <div style={{ position: 'relative' }}>
           <img
@@ -84,14 +87,14 @@ export function ImageUploadSlot({ label, hint, value, onChange, accentColor = '#
         </div>
       ) : (
         <div
-          style={{ border: `1px dashed ${accentColor}44`, borderRadius: 6, padding: '22px 16px', textAlign: 'center', cursor: 'pointer', background: '#0d0d1a' }}
+          style={{ border: `1.5px dashed ${border || accentColor + '77'}`, borderRadius: 8, padding: '22px 16px', textAlign: 'center', cursor: 'pointer', background: surface }}
           onClick={() => inputRef.current?.click()}
           onDragOver={e => e.preventDefault()}
           onDrop={handleDrop}
         >
           <div style={{ fontSize: 26, marginBottom: 6 }}>🖼️</div>
-          <div style={{ fontSize: 12, color: '#555' }}>Click to upload or drag & drop</div>
-          <div style={{ fontSize: 10, color: '#333', marginTop: 3 }}>PNG · JPG · GIF · WEBP{cropAspect ? ' · crop before saving' : ''}</div>
+          <div style={{ fontSize: 13, color: text, fontWeight: 600 }}>Click to upload or drag & drop</div>
+          <div style={{ fontSize: 11, color: textFaint, marginTop: 4 }}>PNG · JPG · GIF · WEBP{cropAspect ? ' · crop before saving' : ''}</div>
           <input ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleInput} />
         </div>
       )}

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import QRCode from 'qrcode'
 import { supabase } from './supabase'
 import { getTheme, ensureGoogleFont, withAlpha, contrastColor, getBrandParts } from './theme'
-import { Avatar } from './Avatar'
+import { Avatar, avatarRing } from './Avatar'
 
 // Read-only, TV-optimized view of a game. Open on a laptop plugged into a TV
 // (or cast the browser tab) so the whole room shares one big visual: the
@@ -101,7 +101,7 @@ export default function BigScreen({ gameId }) {
         {top.map(([name, score], i) => (
           <div key={name} style={s.boardRow}>
             <span style={s.boardRank}>{['🏆', '🥈', '🥉'][i] || `#${i + 1}`}</span>
-            <Avatar id={avatars[name]} fallback={name} size={34} />
+            <Avatar id={avatars[name]} fallback={name} ringColor={avatarRing(name)} size={34} />
             <span style={s.boardName}>{name}</span>
             <span style={s.boardScore}>{score}</span>
           </div>
@@ -128,7 +128,7 @@ export default function BigScreen({ gameId }) {
             <div style={s.lobbyPlayers}>
               <div style={s.boardTitle}>{players.length} IN THE ROOM</div>
               <div style={s.chipWrap}>
-                {players.map(p => <span key={p.name} style={s.playerChip}><Avatar id={avatars[p.name]} fallback={p.name} size={26} />{p.name}</span>)}
+                {players.map(p => <span key={p.name} style={s.playerChip}><Avatar id={avatars[p.name]} fallback={p.name} ringColor={avatarRing(p.name)} size={26} />{p.name}</span>)}
                 {players.length === 0 && <div style={s.dim}>Waiting for players to join…</div>}
               </div>
             </div>
@@ -149,7 +149,7 @@ export default function BigScreen({ gameId }) {
             {totals.map(([name, score], i) => (
               <div key={name} style={{ ...s.boardRow, fontSize: i === 0 ? '3.4vmin' : '2.8vmin' }}>
                 <span style={s.boardRank}>{['🏆', '🥈', '🥉'][i] || `#${i + 1}`}</span>
-                <Avatar id={avatars[name]} fallback={name} size={i === 0 ? 48 : 40} />
+                <Avatar id={avatars[name]} fallback={name} ringColor={avatarRing(name)} size={i === 0 ? 48 : 40} />
                 <span style={s.boardName}>{name}</span>
                 <span style={s.boardScore}>{score} pt{score !== 1 ? 's' : ''}</span>
               </div>
@@ -201,7 +201,7 @@ export default function BigScreen({ gameId }) {
               <div style={s.chipWrap}>
                 {players.map(p => {
                   const inYet = roundAnswers[p.name] != null
-                  return <span key={p.name} style={{ ...s.playerChip, opacity: inYet ? 1 : 0.4, background: inYet ? withAlpha(theme.primaryColor, 0.2) : withAlpha(theme.textColor, 0.06), borderColor: inYet ? theme.primaryColor : withAlpha(theme.textColor, 0.2) }}><Avatar id={avatars[p.name]} fallback={p.name} size={26} />{inYet ? '✓ ' : ''}{p.name}</span>
+                  return <span key={p.name} style={{ ...s.playerChip, opacity: inYet ? 1 : 0.4, background: inYet ? withAlpha(theme.primaryColor, 0.2) : withAlpha(theme.textColor, 0.06), borderColor: inYet ? theme.primaryColor : withAlpha(theme.textColor, 0.2) }}><Avatar id={avatars[p.name]} fallback={p.name} ringColor={avatarRing(p.name)} size={26} />{inYet ? '✓ ' : ''}{p.name}</span>
                 })}
               </div>
             </div>

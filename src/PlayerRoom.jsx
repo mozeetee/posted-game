@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import { getTheme, ensureGoogleFont, withAlpha, contrastColor, getBrandParts } from './theme'
-import { Avatar, AVATARS } from './Avatar'
+import { Avatar, AVATARS, avatarRing } from './Avatar'
 
 const WRONG = '#c0553a' // warm brick red for "incorrect" — reads on the oat paper
 
@@ -337,7 +337,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '7px 6px', borderRadius: 12, background: highlight ? withAlpha(theme.primaryColor, 0.1) : 'transparent' }}>
         {left}
-        <Avatar id={avatarFor(name)} fallback={name} size={size} />
+        <Avatar id={avatarFor(name)} fallback={name} ringColor={avatarRing(name)} size={size} />
         <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: highlight ? theme.primaryColor : theme.textColor }}>{name}</span>
         {right}
       </div>
@@ -398,7 +398,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
             const me = pl.name === playerName
             return (
               <div key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 12px 5px 5px', border: `1.5px solid ${me ? theme.primaryColor : withAlpha(theme.textColor, 0.12)}`, background: me ? withAlpha(theme.primaryColor, 0.08) : theme.cardColor, borderRadius: 22, fontSize: 12.5, fontWeight: 700, color: me ? theme.primaryColor : theme.textColor }}>
-                <Avatar id={avatarFor(pl.name)} fallback={pl.name} size={24} />
+                <Avatar id={avatarFor(pl.name)} fallback={pl.name} ringColor={avatarRing(pl.name)} size={24} />
                 {pl.name}
               </div>
             )
@@ -563,7 +563,7 @@ export default function PlayerRoom({ gameId, initialName = '', mockGame = null, 
               const [t, r, b] = pos.split(' ')
               return <span key={i} style={{ position: 'absolute', top: t !== 'auto' ? t : undefined, right: r !== 'auto' ? r : undefined, bottom: b !== 'auto' ? b : undefined, color: accent, fontSize: 13 }}>✦</span>
             })}
-            <Avatar id={selectedAvatar} size={104} style={{ border: `3px solid ${theme.cardColor}`, boxShadow: `0 8px 20px -10px ${withAlpha(theme.textColor, 0.5)}` }} />
+            <Avatar id={selectedAvatar} size={104} style={{ border: `3px solid ${avatarRing(playerName) || theme.cardColor}`, boxShadow: `0 8px 20px -10px ${withAlpha(theme.textColor, 0.5)}` }} />
           </div>
           <div style={{ ...p.eyebrow, marginTop: 16, marginBottom: 2 }}>Your score</div>
           <div style={{ textAlign: 'center', fontFamily: theme.headingFont, fontWeight: 600, color: theme.primaryColor, fontSize: 44, lineHeight: 1 }}>

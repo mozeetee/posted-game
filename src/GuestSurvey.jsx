@@ -87,6 +87,7 @@ export default function GuestSurvey({ gameId, surveyKey = '' }) {
   }
 
   const contentPosts = posts.filter(p => (p.text || '').trim() || p.image)
+  const deadline = (game?.collectDeadline || '').trim()
 
   async function upsertRow(post, theName) {
     const base = {
@@ -205,7 +206,11 @@ export default function GuestSurvey({ gameId, surveyKey = '' }) {
         <div style={{ ...s.card, textAlign: 'center' }}>
           <div style={{ fontSize: 52, marginBottom: 14 }}>🎉</div>
           <div style={s.h1}>You're in, {name.trim() || 'friend'}!</div>
-          <div style={{ ...s.muted, marginBottom: 24 }}>Your {contentPosts.length === 1 ? 'post is' : `${contentPosts.length} posts are`} saved. The host will build them into the game — the rest of the group will try to guess which ones are yours. You can close this page or add more anytime. 🕵️</div>
+          <div style={{ ...s.muted, marginBottom: 14 }}>
+            <strong style={{ color: theme.secondaryColor }}>✓ {contentPosts.length === 1 ? '1 post' : `${contentPosts.length} posts`} sent to the host.</strong> They’ll build them into the game, and the rest of the group will try to guess which ones are yours. 🕵️
+          </div>
+          <div style={s.privacyNote}>🔒 Only the host sees these. In the game they’re shown without your name.</div>
+          <div style={{ ...s.muted, fontSize: 12, margin: '14px 0 20px' }}>You can close this page or come back anytime to add more.</div>
           <button style={s.ghostBtn} onClick={() => { localStorage.removeItem(guestDoneKey(gameId)); setStatus('form') }}>Add or edit my posts</button>
         </div>
       </Page>
@@ -218,9 +223,12 @@ export default function GuestSurvey({ gameId, surveyKey = '' }) {
       <div style={s.card}>
         <div style={s.eyebrow}>{game.title || "That's So Them"}</div>
         <div style={s.h1}>Dig up your own posts 🕵️</div>
-        <div style={{ ...s.muted, marginBottom: 22 }}>
+        <div style={{ ...s.muted, marginBottom: 16 }}>
           Add a few of your own gems — an old status, a spicy hot take, a caption, a throwback screenshot. At the party, everyone will try to guess who posted each one. The more <em>so-you</em> it is, the better. Everything saves automatically.
         </div>
+
+        <div style={s.privacyNote}>🔒 Only the host sees these now. During the game they’re shown <strong>without your name</strong> — so guessing who posted each one stays a surprise.</div>
+        <div style={s.guide}>Aim for <strong>3–5 posts</strong>.{deadline ? <> Your host needs them by <strong>{deadline}</strong>.</> : null}</div>
 
         <div style={{ marginBottom: 26 }}>
           <label style={s.qPrompt}>Your name</label>
@@ -239,15 +247,19 @@ export default function GuestSurvey({ gameId, surveyKey = '' }) {
               style={s.textarea}
               value={p.text}
               onChange={e => updatePostText(p.id, e.target.value)}
-              placeholder="Type your post — a caption, quote, or hot take. (Optional if you upload a screenshot.)"
+              placeholder={'e.g. “I alphabetize my spice cabinet — and secretly rearrange other people’s.” (Optional if you add a screenshot.)'}
             />
             <div style={{ marginTop: 10 }}>
               <ImageUploadSlot
                 label="SCREENSHOT (OPTIONAL)"
-                hint="Add a screenshot of the actual post if you have one"
+                hint="A screenshot of the real post is great — just crop out anyone else’s name, face, or private info first."
                 value={p.image}
                 onChange={v => updatePostImage(p.id, v)}
                 accentColor={theme.secondaryColor}
+                surface={theme.cardColor}
+                text={theme.textColor}
+                textFaint={withAlpha(theme.textColor, 0.6)}
+                border={withAlpha(theme.textColor, 0.2)}
                 cropAspect={1}
               />
             </div>
@@ -302,6 +314,8 @@ function buildStyles(theme) {
     h1: { fontSize: 30, fontWeight: 900, color: primary, fontFamily: headingFont, textAlign: 'center', marginBottom: 12, lineHeight: 1.15 },
     h2: { fontSize: 20, fontWeight: 800, color: text, fontFamily: headingFont, marginBottom: 10 },
     muted: { fontSize: 13, color: withAlpha(text, 0.6), lineHeight: 1.6, textAlign: 'center' },
+    privacyNote: { fontSize: 12.5, lineHeight: 1.55, color: withAlpha(text, 0.78), background: withAlpha(secondary, 0.1), border: `1px solid ${withAlpha(secondary, 0.25)}`, borderRadius: 8, padding: '10px 13px', marginBottom: 12, textAlign: 'left' },
+    guide: { fontSize: 13, color: withAlpha(text, 0.7), lineHeight: 1.5, marginBottom: 22, textAlign: 'center' },
     roundLabel: { fontSize: 11, letterSpacing: 3, color: secondary, fontWeight: 700, textTransform: 'uppercase', marginBottom: 14, paddingBottom: 8, borderBottom: `1px solid ${withAlpha(secondary, 0.25)}` },
     qPrompt: { display: 'block', fontSize: 14, color: text, marginBottom: 8, lineHeight: 1.5, fontWeight: 600 },
     input: { width: '100%', background: card, border: `1px solid ${withAlpha(text, 0.15)}`, borderRadius: 6, color: text, padding: '13px 15px', fontSize: 15, fontFamily: bodyFont, boxSizing: 'border-box' },
