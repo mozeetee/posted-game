@@ -37,6 +37,22 @@ export function getAvatar(id) {
   return AVATARS.find(a => a.id === id) || null
 }
 
+// Up to ~20 players share 9 creatures, so give each person a stable colour ring
+// (hashed from their name) — two "Bears" then read as, say, a plum Bear and a
+// teal Bear. Combined with the 9 creatures that's 100+ distinct identities, so
+// collisions (same creature AND colour) are rare even in a full game.
+export const RING_COLORS = [
+  '#8f5a73', '#4f7d73', '#c98a2f', '#5f8c5a', '#c0553a', '#5b6bb0',
+  '#b0754f', '#7a8f3a', '#3f8f8a', '#9a5fb0', '#cf6b8a', '#5a7d4f',
+]
+export function avatarRing(name) {
+  const s = (name || '').trim().toLowerCase()
+  if (!s) return null
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+  return RING_COLORS[h % RING_COLORS.length]
+}
+
 // One avatar. Pass `fallback` (e.g. a name) to render a lettered chip when the
 // player has no avatar yet — so older games and mid-join players still look fine.
 export function Avatar({ id, size = 40, fallback = '', ringColor = null, style = {} }) {

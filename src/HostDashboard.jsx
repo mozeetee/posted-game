@@ -4,7 +4,7 @@ import { ImageUploadSlot } from './ImageUpload'
 import { compressImage, readFileAsDataUrl } from './ImageUpload'
 import { DEFAULT_THEME, THEME_PRESETS, FONT_OPTIONS, getTheme, ensureGoogleFont, withAlpha, contrastColor, BRAND_NAME, BRAND_TAGLINE, EDITIONS, getEditionConfig, getBrandParts } from './theme'
 import PlayerRoom from './PlayerRoom'
-import { Avatar } from './Avatar'
+import { Avatar, avatarRing } from './Avatar'
 import { BUZZER_PRESETS } from './buzzer/presets'
 
 const DASH_MODE_KEY = 'wpt_dash_mode'
@@ -1042,6 +1042,12 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               <div style={{ fontSize: 11, color: c.textFaint, marginBottom: 10, lineHeight: 1.5 }}>One link for everyone — text it, drop it in the group chat, or share it however you like. Guests just add their name and their posts.</div>
               {currentGame.surveyKey && <div style={{ fontSize: 11, color: c.textMuted, wordBreak: 'break-all', marginBottom: 10, lineHeight: 1.5 }}>{getGuestSurveyLink(currentGame)}</div>}
               <button style={{ ...s.copyBtn, background: c.success, color: c.successText }} onClick={copyGuestSurveyLink}>{surveyCopied ? '✓ Copied!' : 'Copy Guest Survey Link'}</button>
+              <div style={{ marginTop: 14 }}>
+                <label style={s.label}>DEADLINE (OPTIONAL)</label>
+                <input style={s.input} placeholder="e.g. this Friday" defaultValue={currentGame.collectDeadline || ''}
+                  onBlur={async e => { const v = e.target.value.trim(); const updated = { ...currentGame, collectDeadline: v }; setCurrentGame(updated); await saveGame({ ...updated, title: gameTitle }) }} />
+                <div style={{ fontSize: 11, color: c.textFaint, marginTop: 4, lineHeight: 1.5 }}>Shown on the guest survey to nudge people to add their posts in time.</div>
+              </div>
             </div>
 
             <div style={{ ...s.shareBox, borderColor: withAlpha((surveyStatus.posts > 0) ? c.success : c.accent, 0.3) }}>
@@ -1436,7 +1442,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
               {livePlayers.map(p => (
                 <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 13px 5px 5px', border: `1px solid ${answeredPlayers.has(p.name) ? c.success : c.border}`, borderRadius: 22, fontSize: 12.5, fontWeight: 700, color: c.textDim, transition: 'border-color 0.3s' }}>
-                  <Avatar id={liveAvatars[p.name]} fallback={p.name} size={22} />
+                  <Avatar id={liveAvatars[p.name]} fallback={p.name} ringColor={avatarRing(p.name)} size={22} />
                   {p.name}{answeredPlayers.has(p.name) && <span style={{ color: c.success }}> ✓</span>}
                 </div>
               ))}
@@ -1466,13 +1472,13 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
                       const correct = liveAnswers[`${pl.name}:::${qIdx}`] === q.author
                       return (
                         <span key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px 4px 4px', borderRadius: 20, fontSize: 12, fontWeight: 700, border: `1px solid ${correct ? withAlpha(c.success, 0.53) : withAlpha(c.danger, 0.53)}`, background: correct ? withAlpha(c.success, 0.08) : withAlpha(c.danger, 0.08), color: c.textDim }}>
-                          <Avatar id={liveAvatars[pl.name]} fallback={pl.name} size={20} /> {correct ? '✅' : '❌'} {pl.name}
+                          <Avatar id={liveAvatars[pl.name]} fallback={pl.name} ringColor={avatarRing(pl.name)} size={20} /> {correct ? '✅' : '❌'} {pl.name}
                         </span>
                       )
                     })}
                     {livePlayers.filter(pl => !answeredPlayers.has(pl.name)).map(pl => (
                       <span key={pl.name} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px 4px 4px', borderRadius: 20, fontSize: 12, fontWeight: 700, border: `1px dashed ${c.border}`, color: c.textFaint }}>
-                        <Avatar id={liveAvatars[pl.name]} fallback={pl.name} size={20} /> ⏳ {pl.name}
+                        <Avatar id={liveAvatars[pl.name]} fallback={pl.name} ringColor={avatarRing(pl.name)} size={20} /> ⏳ {pl.name}
                       </span>
                     ))}
                   </div>
@@ -1522,7 +1528,7 @@ export default function HostDashboard({ hostGameId = null, hostAccessKey = '' })
               {scores.map(([name, score], i) => (
                 <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 12 }}>
                   <div style={{ width: 26, fontSize: 16, textAlign: 'center' }}>{['🏆','🥈','🥉'][i] || `#${i+1}`}</div>
-                  <Avatar id={liveAvatars[name]} fallback={name} size={30} />
+                  <Avatar id={liveAvatars[name]} fallback={name} ringColor={avatarRing(name)} size={30} />
                   <div style={{ flex: 1, fontSize: 14, fontWeight: 700 }}>{name}</div>
                   <div style={{ fontSize: 13, color: c.accent, minWidth: 50, textAlign: 'right' }}>{score} pt{score !== 1 ? 's' : ''}</div>
                   <div style={{ width: 80, height: 4, background: c.borderSoft, borderRadius: 2, overflow: 'hidden' }}>
